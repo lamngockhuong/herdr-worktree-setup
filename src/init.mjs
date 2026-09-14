@@ -51,7 +51,7 @@ export function renderTemplate(detected) {
 ${found}
 
 # Look for the config files listed above. Turn off to copy only what you name.
-auto_detect = true
+# auto_detect = true
 
 # Replace the built-in pattern list entirely. The defaults cover .env files,
 # .envrc, .npmrc, .dev.vars, local.properties, *.tfvars and Rails credentials.

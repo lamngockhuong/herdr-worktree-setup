@@ -17,7 +17,7 @@ test("writes a starter config that lists what it detects today", () => {
 
   const contents = readFileSync(join(repo, CONFIG_FILENAME), "utf8");
   assert.match(contents, /#\s+apps\/api\/\.env\.local/);
-  assert.match(contents, /^auto_detect = true$/m);
+  assert.match(contents, /^# auto_detect = true$/m);
 });
 
 test("the generated file parses and normalizes to the defaults", () => {
@@ -25,8 +25,8 @@ test("the generated file parses and normalizes to the defaults", () => {
   write(repo, ".env", "A=1");
   init(pluginEnv(repo, repo), []);
 
-  // Every key but auto_detect ships commented out, so writing the file must not
-  // change a single thing about how the plugin behaves.
+  // Every key ships commented out, so writing the file must not change a single
+  // thing about how the plugin behaves.
   const config = loadConfig(repo);
   assert.equal(config.configured, true);
   for (const [key, value] of Object.entries(DEFAULTS)) {
@@ -62,7 +62,7 @@ test("targets the main checkout even when invoked from a linked worktree", () =>
   assert.equal(resolveRepoRoot(env, []), repo);
 
   assert.equal(init(env, []), 0);
-  assert.match(readFileSync(join(repo, CONFIG_FILENAME), "utf8"), /^auto_detect = true$/m);
+  assert.match(readFileSync(join(repo, CONFIG_FILENAME), "utf8"), /^# auto_detect = true$/m);
 });
 
 test("accepts a path argument for use outside Herdr", () => {

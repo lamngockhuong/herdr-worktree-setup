@@ -51,7 +51,7 @@ Let the plugin write the file for you, from the workspace of the repository you 
 herdr plugin action invoke lamngockhuong.worktree-setup.init-config
 ```
 
-It drops a fully commented `.herdr-worktree.toml` at the repository root — every key documented, all of them commented out except `auto_detect`, so creating the file changes nothing until you edit it. The header lists what detection finds in *your* repository right now, which is usually the fastest way to see whether you need any configuration at all:
+It drops a fully commented `.herdr-worktree.toml` at the repository root — every key documented, every one of them commented out, so creating the file changes nothing until you edit it. The header lists what detection finds in *your* repository right now, which is usually the fastest way to see whether you need any configuration at all:
 
 ```toml
 # Detected in this repository right now:
