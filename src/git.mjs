@@ -57,3 +57,9 @@ export function isIgnored(repoRoot, relativePath) {
   });
   return result.status === 0;
 }
+
+/** Repository root for any path inside a checkout, resolved to the main one. */
+export function repoRootFrom(cwd) {
+  const toplevel = git(cwd, ["rev-parse", "--show-toplevel"]);
+  return mainWorktree(toplevel);
+}

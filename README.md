@@ -45,7 +45,25 @@ Two more rules worth knowing:
 
 ## Configuration
 
-Drop `.herdr-worktree.toml` at the repository root. Every key is optional.
+Let the plugin write the file for you, from the workspace of the repository you want to configure:
+
+```bash
+herdr plugin action invoke lamngockhuong.worktree-setup.init-config
+```
+
+It drops a fully commented `.herdr-worktree.toml` at the repository root — every key documented, all of them commented out except `auto_detect`, so creating the file changes nothing until you edit it. The header lists what detection finds in *your* repository right now, which is usually the fastest way to see whether you need any configuration at all:
+
+```toml
+# Detected in this repository right now:
+#   apps/api/.env.local
+#   apps/web/.env.local
+#   apps/worker/.env.local
+#   packages/database/.env.local
+```
+
+An existing config is never overwritten. Outside Herdr, `node src/init.mjs /path/to/repo` does the same thing.
+
+Or write it by hand. Every key is optional.
 
 ```toml
 # Turn the built-in detection off to copy only what you list below.
