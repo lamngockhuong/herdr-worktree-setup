@@ -66,7 +66,7 @@ function checkPath(key, value) {
 
 /** Validate a parsed config object and fill in every default. */
 export function normalizeConfig(raw) {
-  const unknown = Object.keys(raw).filter((key) => !(key in SCHEMA));
+  const unknown = Object.keys(raw).filter((key) => !Object.hasOwn(SCHEMA, key));
   if (unknown.length > 0) {
     throw new ConfigError(
       `unknown key(s): ${unknown.join(", ")}. Valid keys: ${Object.keys(SCHEMA).join(", ")}`,
@@ -74,7 +74,7 @@ export function normalizeConfig(raw) {
   }
 
   for (const [key, type] of Object.entries(SCHEMA)) {
-    if (key in raw) checkType(key, raw[key], type);
+    if (Object.hasOwn(raw, key)) checkType(key, raw[key], type);
   }
 
   for (const key of PATH_KEYS) {

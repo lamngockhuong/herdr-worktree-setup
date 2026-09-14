@@ -98,7 +98,7 @@ function parseValue(raw, lineNo) {
   const text = raw.trim();
   if (text === "") throw new TomlError("missing value", lineNo);
 
-  if (text in BOOLEANS) return BOOLEANS[text];
+  if (Object.hasOwn(BOOLEANS, text)) return BOOLEANS[text];
 
   if (text.startsWith("[")) {
     if (!text.endsWith("]")) throw new TomlError("unterminated array", lineNo);
@@ -161,8 +161,11 @@ export function parseToml(source) {
     if (line.startsWith("[")) {
       const match = /^\[([A-Za-z0-9_.-]+)\]$/.exec(line);
       if (!match) throw new TomlError(`unsupported section header: ${line}`, lineNo);
+      const name = match[1];
+      // Reopening a section would drop everything the first one held.
+      if (Object.hasOwn(root, name)) throw new TomlError(`duplicate key: ${name}`, lineNo);
       table = {};
-      root[match[1]] = table;
+      root[name] = table;
       continue;
     }
 
@@ -171,7 +174,7 @@ export function parseToml(source) {
 
     const key = line.slice(0, eq).trim();
     if (!/^[A-Za-z0-9_-]+$/.test(key)) throw new TomlError(`unsupported key: ${key}`, lineNo);
-    if (key in table) throw new TomlError(`duplicate key: ${key}`, lineNo);
+    if (Object.hasOwn(table, key)) throw new TomlError(`duplicate key: ${key}`, lineNo);
 
     let rest = line.slice(eq + 1).trim();
     while (isIncomplete(rest)) {

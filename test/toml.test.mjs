@@ -33,6 +33,13 @@ test("keeps a hash inside a string but drops a real comment", () => {
   assert.deepEqual(config.copy, ["a#b"]);
 });
 
+test("reports a duplicate key without inventing an earlier line", () => {
+  assert.throws(
+    () => parseToml("toString = 1\ntoString = 2"),
+    /duplicate key: toString \(line 2\)/,
+  );
+});
+
 test("nests one level of section headers", () => {
   const config = parseToml(["top = 1", "[tool]", "flag = false"].join("\n"));
   assert.equal(config.top, 1);
@@ -52,6 +59,10 @@ test("rejects input outside the supported subset", () => {
     "[[array.of.tables]]",
     'dup = "a"\ndup = "b"',
     'open = ["a",',
+    // An inherited property name is neither a value nor an already-seen key.
+    "value = constructor",
+    "value = [toString]",
+    "[a]\nx = 1\n[a]\ny = 2",
   ];
   for (const source of cases) {
     assert.throws(() => parseToml(source), TomlError, `expected a throw for: ${source}`);
