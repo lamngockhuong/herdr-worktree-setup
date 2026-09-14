@@ -77,7 +77,9 @@ export function runPostCreate(worktreePath, commands, { timeoutMs, configDir, re
         action: "post_create",
         path: command,
         status: "failed",
-        detail: `timed out after ${timeoutMs}ms`,
+        detail:
+          `timed out after ${timeoutMs}ms; the shell was killed, but anything it ` +
+          "had already started may still be running in the worktree",
       });
       break;
     }
