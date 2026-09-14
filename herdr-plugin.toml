@@ -1,0 +1,10 @@
+id = "lamngockhuong.worktree-setup"
+name = "Worktree Setup"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Prepare every new Herdr worktree: copy per-checkout config, link shared directories, run setup commands"
+platforms = ["linux", "macos", "windows"]
+
+[[events]]
+on = "worktree.created"
+command = ["node", "src/index.mjs"]

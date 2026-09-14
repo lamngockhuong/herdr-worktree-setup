@@ -1,0 +1,147 @@
+# Herdr Worktree Setup
+
+A [Herdr](https://herdr.dev) plugin that prepares every worktree Herdr creates.
+
+`git worktree add` gives you a clean checkout of tracked files — and nothing else. The `.env` you spent an afternoon filling in stays behind in the main checkout, so the first thing a new worktree does is fail to boot. This plugin closes that gap on the `worktree.created` event.
+
+It works with no configuration at all: it finds the config files git is ignoring and copies them across. A repository that wants more can say so in `.herdr-worktree.toml`.
+
+Runs on Linux, macOS, and Windows. No dependencies beyond Node and git.
+
+## Install
+
+```bash
+herdr plugin install lamngockhuong/herdr-worktree-setup
+```
+
+Requirements: Herdr 0.7.0+, Node 22.5+ on `PATH`, git.
+
+Nothing else to do. Create a worktree and watch the toast:
+
+```bash
+herdr worktree create --branch feature/checkout
+```
+
+## What it finds on its own
+
+The plugin copies a file only when git ignores it **and** its name looks like per-checkout configuration. That pairing is the whole safety story: a build directory or a dependency tree is ignored but never matches a pattern, and a tracked file is already in the worktree.
+
+| Pattern | Typical source |
+| --- | --- |
+| `**/.env`, `**/.env.*` | Node, Python, Rails, Docker Compose |
+| `**/.envrc` | direnv |
+| `**/.dev.vars`, `**/.dev.vars.*` | Cloudflare Workers |
+| `**/.npmrc`, `**/.yarnrc.yml` | private registry tokens |
+| `**/local.properties` | Android SDK paths |
+| `**/*.tfvars`, `**/*.tfvars.json` | Terraform |
+| `config/master.key`, `config/credentials/*.key` | Rails credentials |
+
+Anything ending in `.example`, `.sample`, `.template`, `.dist`, or `.tpl` is skipped — those are committed placeholders, and the worktree already has them.
+
+Two more rules worth knowing:
+
+- **Nothing is ever overwritten.** A path that already exists in the new worktree is left exactly as it is.
+- **Wholly ignored directories are not searched.** When `.gitignore` excludes `node_modules/`, git reports the directory, not its contents, and the plugin never walks inside. The Rails paths above are probed directly for exactly this reason.
+
+## Configuration
+
+Drop `.herdr-worktree.toml` at the repository root. Every key is optional.
+
+```toml
+# Turn the built-in detection off to copy only what you list below.
+auto_detect = true
+
+# Replace the built-in pattern list entirely.
+patterns = ["**/.env.*", "**/secrets.yaml"]
+
+# Always copy these, detected or not. Relative to the repository root.
+copy = ["config/keystore.p12"]
+
+# Link back to the main checkout instead of copying. Good for large directories.
+symlink = ["node_modules"]
+
+# Drop these from what detection found. Explicit `copy` entries are not affected.
+exclude = ["**/.env.ci"]
+
+# Create a missing `.env` from a committed `.env.example`. Off by default.
+seed_from_example = false
+
+# Commands to run in the new worktree. Requires trust — see below.
+post_create = ["pnpm install"]
+post_create_timeout_ms = 600000
+
+# Show a Herdr toast when the run finishes.
+notify = true
+```
+
+| Key | Type | Default |
+| --- | --- | --- |
+| `auto_detect` | boolean | `true` |
+| `patterns` | string list | the table above |
+| `copy` | string list | `[]` |
+| `symlink` | string list | `[]` |
+| `exclude` | string list | `[]` |
+| `seed_from_example` | boolean | `false` |
+| `post_create` | string list | `[]` |
+| `post_create_timeout_ms` | integer | `600000` |
+| `notify` | boolean | `true` |
+
+A misspelled key is an error, not a shrug: the plugin names it and lists the valid ones. `copy` and `symlink` entries must stay inside the repository — absolute paths and `..` are rejected.
+
+The file reads a deliberately small slice of TOML: comments, `key = value`, and one level of `[section]` headers, where a value is a boolean, an integer, a string, or a list of those. Anything else fails loudly rather than parsing into silence.
+
+### `seed_from_example`
+
+Off by default, and that is a judgment call worth explaining. A `.env` full of `replace-me` placeholders starts the app and then misbehaves somewhere deep; a missing `.env` fails immediately and tells you what is wrong. Turn it on for repositories where the example file holds working local defaults.
+
+## Setup commands and trust
+
+`post_create` runs commands the *repository* chose. Cloning someone's project and opening a worktree must never be enough to execute them, so the machine's owner opts each repository in, from outside the repository:
+
+```bash
+herdr plugin config-dir lamngockhuong.worktree-setup
+# append the repository's absolute path to trusted-repos.txt in that directory
+```
+
+One absolute path per line; `#` starts a comment. Until a repository appears there, its `post_create` block is skipped and the log prints the exact line to add.
+
+`HERDR_WORKTREE_SETUP_TRUST_ALL=1` disables the gate entirely. Set it only if every repository you open is one you wrote.
+
+Commands run through the platform shell in the new worktree, stopping at the first failure.
+
+## Copy or link?
+
+Copy for anything that may diverge between branches — every `.env` qualifies.
+
+Link for large directories that are expensive to rebuild. Be careful with dependency trees: a linked `node_modules` means the worktree runs the *main* checkout's dependencies, so two branches with different lockfiles will fight over one tree. Prefer `post_create = ["pnpm install"]` when branches change dependencies, and reach for `symlink` when they do not.
+
+On Windows, directory links are created as junctions, which need no special privileges. File links do need Developer Mode or an elevated shell; when Windows refuses one, the plugin copies the file instead and says so in the log.
+
+## When something looks wrong
+
+Every run writes a full report — one line per file, with the reason for each skip:
+
+```bash
+herdr plugin log list --plugin lamngockhuong.worktree-setup --limit 20
+```
+
+You can also run the hook by hand against any checkout:
+
+```bash
+HERDR_PLUGIN_CONTEXT_JSON='{"worktree":{"checkout_path":"/path/to/worktree","repo_root":"/path/to/repo"}}' \
+  node src/index.mjs
+```
+
+## Development
+
+```bash
+git clone https://github.com/lamngockhuong/herdr-worktree-setup.git
+cd herdr-worktree-setup
+npm test          # node:test, builds real repositories in a temp directory
+npm run lint
+herdr plugin link .
+```
+
+## License
+
+MIT © Lam Ngoc Khuong
