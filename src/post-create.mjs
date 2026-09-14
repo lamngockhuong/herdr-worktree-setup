@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export const TRUST_FILENAME = "trusted-repos.txt";
@@ -20,10 +20,23 @@ export function readTrustList(configDir) {
   }
 }
 
+// The same repository can be spelled several ways: a symlinked /var on macOS,
+// an 8.3 short name or either slash on Windows, a different case on both. Trust
+// must survive all of them, so every path is reduced to one canonical form.
+function canonical(path) {
+  let resolved = resolve(path);
+  try {
+    resolved = realpathSync.native(resolved);
+  } catch {
+    // The path may not exist; the resolved form is the closest we can get.
+  }
+  return process.platform === "win32" ? resolved.replaceAll("\\", "/").toLowerCase() : resolved;
+}
+
 export function isTrusted(repoRoot, trusted, env = process.env) {
   if (env.HERDR_WORKTREE_SETUP_TRUST_ALL === "1") return true;
-  const target = resolve(repoRoot);
-  return trusted.some((entry) => resolve(entry) === target);
+  const target = canonical(repoRoot);
+  return trusted.some((entry) => canonical(entry) === target);
 }
 
 /**

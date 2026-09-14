@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 
 /**
  * Run git in `cwd` and return trimmed stdout. Throws with git's own stderr when
@@ -25,7 +26,8 @@ export function mainWorktree(cwd) {
   const porcelain = git(cwd, ["worktree", "list", "--porcelain"]);
   const first = porcelain.split(/\r?\n/).find((line) => line.startsWith("worktree "));
   if (!first) throw new Error(`no main worktree found from ${cwd}`);
-  return first.slice("worktree ".length);
+  // git prints forward slashes even on Windows; give callers the native form.
+  return resolve(first.slice("worktree ".length));
 }
 
 /**

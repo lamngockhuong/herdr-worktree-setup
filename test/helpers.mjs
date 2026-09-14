@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -23,7 +23,9 @@ export function write(root, relative, contents) {
 
 /** A throwaway git repository with one commit, cleaned up after the suite. */
 export function makeRepo(files = {}, { gitignore = "" } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "herdr-wt-"));
+  // git reports the real path, so the fixture must not hand back a symlinked
+  // or 8.3 short one, or every path comparison in the suite disagrees.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "herdr-wt-")));
   created.push(root);
 
   run(root, ["init", "-q", "-b", "main"]);
@@ -41,10 +43,11 @@ export function makeRepo(files = {}, { gitignore = "" } = {}) {
 
 /** Add a linked worktree and return its path. */
 export function addWorktree(repoRoot, branch = "feature") {
-  const path = join(repoRoot, "..", `${branch}-${Date.now()}`);
-  run(repoRoot, ["worktree", "add", "-q", "-b", branch, path]);
-  created.push(path);
-  return path;
+  const path = realpathSync.native(join(repoRoot, ".."));
+  const target = join(path, `${branch}-${Date.now()}`);
+  run(repoRoot, ["worktree", "add", "-q", "-b", branch, target]);
+  created.push(target);
+  return target;
 }
 
 /** Plugin environment as Herdr would set it for a worktree.created hook. */
