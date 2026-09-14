@@ -1,18 +1,29 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, statSync, symlinkSync } from "node:fs";
+import { cpSync, lstatSync, mkdirSync, readlinkSync, statSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { EXAMPLE_SUFFIXES, isExample } from "./detect.mjs";
+import { EXAMPLE_SUFFIXES, isExample, matchesAny } from "./detect.mjs";
 import { trackedFiles } from "./git.mjs";
 
 const IS_WINDOWS = process.platform === "win32";
 
 const result = (action, path, status, detail) => ({ action, path, status, detail });
 
-// A target that already exists is left alone. The hook runs on a fresh
-// checkout, so anything already there came from git and outranks a copy.
-function targetExists(path) {
+// Deliberately lstat: a symlink whose destination is missing is still a path
+// worth reproducing, and a target that already exists is left alone because the
+// hook runs on a fresh checkout, so anything already there came from git.
+function pathExists(path) {
   try {
     lstatSync(path);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+// Follows links on purpose: only Windows cares, and there a link to a directory
+// needs a junction. A dangling link falls back to the file form.
+function isDirectory(path) {
+  try {
+    return statSync(path).isDirectory();
   } catch {
     return false;
   }
@@ -22,44 +33,66 @@ function ensureParent(path) {
   mkdirSync(dirname(path), { recursive: true });
 }
 
+// One unwritable file must not abandon everything after it. The failure lands
+// in the report and the run ends non-zero, but the remaining entries still run.
+function attempt(action, relative, work) {
+  try {
+    return work();
+  } catch (error) {
+    return result(action, relative, "failed", error.message);
+  }
+}
+
+/**
+ * Point `target` at `destination`. Windows refuses file symlinks without
+ * Developer Mode, so a refused link degrades to a copy of `content` rather than
+ * failing the run, and says so in the detail it returns.
+ */
+function writeLink(destination, target, content) {
+  try {
+    symlinkSync(destination, target, IS_WINDOWS && isDirectory(content) ? "junction" : "file");
+    return undefined;
+  } catch (error) {
+    if (!IS_WINDOWS || (error.code !== "EPERM" && error.code !== "EACCES")) throw error;
+    cpSync(content, target, { recursive: true, verbatimSymlinks: true });
+    return "copied instead: Windows refused the link";
+  }
+}
+
 /** Copy one repo-relative path from the main worktree into the new checkout. */
 export function copyEntry(repoRoot, worktreePath, relative) {
   const source = join(repoRoot, relative);
   const target = join(worktreePath, relative);
 
-  if (!existsSync(source)) return result("copy", relative, "skipped", "source is missing");
-  if (targetExists(target)) return result("copy", relative, "skipped", "already in the worktree");
+  if (!pathExists(source)) return result("copy", relative, "skipped", "source is missing");
+  if (pathExists(target)) return result("copy", relative, "skipped", "already in the worktree");
 
-  ensureParent(target);
-  cpSync(source, target, { recursive: true, verbatimSymlinks: true });
-  return result("copy", relative, "done");
+  return attempt("copy", relative, () => {
+    ensureParent(target);
+    // cpSync refuses a link whose destination does not exist, even with
+    // verbatimSymlinks, so a link is rebuilt from what it points at instead.
+    if (lstatSync(source).isSymbolicLink()) {
+      return result("copy", relative, "done", writeLink(readlinkSync(source), target, source));
+    }
+    cpSync(source, target, { recursive: true, verbatimSymlinks: true });
+    return result("copy", relative, "done");
+  });
 }
 
-/**
- * Link one repo-relative path back to the main worktree. Windows needs a
- * junction for directories and refuses file symlinks without Developer Mode, so
- * a refused link degrades to a copy rather than failing the run.
- */
+/** Link one repo-relative path back to the main worktree. */
 export function symlinkEntry(repoRoot, worktreePath, relative) {
   const source = join(repoRoot, relative);
   const target = join(worktreePath, relative);
 
-  if (!existsSync(source)) return result("symlink", relative, "skipped", "source is missing");
-  if (targetExists(target)) {
+  if (!pathExists(source)) return result("symlink", relative, "skipped", "source is missing");
+  if (pathExists(target)) {
     return result("symlink", relative, "skipped", "already in the worktree");
   }
 
-  const isDirectory = statSync(source).isDirectory();
-  ensureParent(target);
-
-  try {
-    symlinkSync(source, target, IS_WINDOWS && isDirectory ? "junction" : "file");
-    return result("symlink", relative, "done");
-  } catch (error) {
-    if (!IS_WINDOWS || (error.code !== "EPERM" && error.code !== "EACCES")) throw error;
-    cpSync(source, target, { recursive: true, verbatimSymlinks: true });
-    return result("symlink", relative, "done", "copied instead: Windows refused the link");
-  }
+  return attempt("symlink", relative, () => {
+    ensureParent(target);
+    return result("symlink", relative, "done", writeLink(source, target, source));
+  });
 }
 
 /** Strip a placeholder suffix, so `.env.local.example` becomes `.env.local`. */
@@ -74,18 +107,22 @@ export function exampleTarget(relative) {
  * counterpart is still missing gets a starting copy. Off by default, because a
  * file full of placeholder values can be worse than an obvious absence.
  */
-export function seedFromExamples(worktreePath, { patterns, matchesAny }) {
+export function seedFromExamples(worktreePath, patterns) {
   const results = [];
   for (const tracked of trackedFiles(worktreePath)) {
     if (!isExample(tracked)) continue;
 
     const target = exampleTarget(tracked);
     if (!target || !matchesAny(target, patterns)) continue;
-    if (targetExists(join(worktreePath, target))) continue;
+    if (pathExists(join(worktreePath, target))) continue;
 
-    ensureParent(join(worktreePath, target));
-    cpSync(join(worktreePath, tracked), join(worktreePath, target));
-    results.push(result("seed", target, "done", `from ${tracked}`));
+    results.push(
+      attempt("seed", target, () => {
+        ensureParent(join(worktreePath, target));
+        cpSync(join(worktreePath, tracked), join(worktreePath, target));
+        return result("seed", target, "done", `from ${tracked}`);
+      }),
+    );
   }
   return results;
 }

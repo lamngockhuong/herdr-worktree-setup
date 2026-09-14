@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { copyEntry, seedFromExamples, symlinkEntry } from "./apply.mjs";
 import { CONFIG_FILENAME, loadConfig } from "./config.mjs";
 import { readContext } from "./context.mjs";
-import { detectFiles, matchesAny } from "./detect.mjs";
+import { detectFiles } from "./detect.mjs";
 import { runPostCreate } from "./post-create.mjs";
 import { notify, printReport, summarize, summaryLine } from "./report.mjs";
 
@@ -30,16 +30,19 @@ export function run(env = process.env) {
 
   const results = [];
 
-  for (const relative of collectCopyTargets(repoRoot, config)) {
-    results.push(copyEntry(repoRoot, worktreePath, relative));
-  }
-
+  // Links go in before copies. Copying first would create the parent directories
+  // of every detected file, and a directory the user asked to link would then
+  // already exist by the time its turn came, so the link was quietly dropped.
   for (const relative of config.symlink) {
     results.push(symlinkEntry(repoRoot, worktreePath, relative.replaceAll("\\", "/")));
   }
 
+  for (const relative of collectCopyTargets(repoRoot, config)) {
+    results.push(copyEntry(repoRoot, worktreePath, relative));
+  }
+
   if (config.seed_from_example) {
-    results.push(...seedFromExamples(worktreePath, { patterns: config.patterns, matchesAny }));
+    results.push(...seedFromExamples(worktreePath, config.patterns));
   }
 
   results.push(

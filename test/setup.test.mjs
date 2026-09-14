@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -58,6 +58,44 @@ test("honours explicit copy and symlink entries from the config file", () => {
   assert.equal(read(worktree, "secrets/keystore.p12"), "binary");
   assert.equal(lstatSync(join(worktree, "shared")).isSymbolicLink(), true);
   assert.equal(read(worktree, "shared/cache/blob.bin"), "big");
+});
+
+test("links a directory before copying anything into it", () => {
+  const repo = makeRepo({}, { gitignore: ".env\nshared/blob.bin\n" });
+  write(repo, "shared/.env", "SHARED=1");
+  write(repo, "shared/blob.bin", "big");
+  write(repo, ".herdr-worktree.toml", 'symlink = ["shared"]\nnotify = false');
+  const worktree = addWorktree(repo, "link-then-copy");
+
+  assert.equal(run(pluginEnv(repo, worktree)), 0);
+  assert.equal(lstatSync(join(worktree, "shared")).isSymbolicLink(), true);
+  assert.equal(read(worktree, "shared/blob.bin"), "big");
+});
+
+test("reproduces a config symlink whose destination does not exist", () => {
+  const repo = makeRepo({}, { gitignore: ".env\n" });
+  symlinkSync(join(repo, "secrets/mounted.env"), join(repo, ".env"));
+  const worktree = addWorktree(repo, "dangling");
+
+  assert.equal(run(pluginEnv(repo, worktree)), 0);
+  assert.equal(lstatSync(join(worktree, ".env")).isSymbolicLink(), true);
+});
+
+test("one unwritable entry fails on its own without abandoning the rest", () => {
+  const repo = makeRepo({}, { gitignore: "blocked/\nkeep.local\n" });
+  write(repo, "blocked/.env", "BLOCKED=1");
+  write(repo, "keep.local", "KEPT=1");
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    'auto_detect = false\ncopy = ["blocked/.env", "keep.local"]\nnotify = false',
+  );
+  const worktree = addWorktree(repo, "partial-failure");
+  // A plain file where the copy needs a directory, so creating the parent throws.
+  write(worktree, "blocked", "not a directory");
+
+  assert.equal(run(pluginEnv(repo, worktree)), 1);
+  assert.equal(read(worktree, "keep.local"), "KEPT=1");
 });
 
 test("seeds a missing file from its committed example only when asked", () => {
