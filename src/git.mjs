@@ -31,23 +31,27 @@ export function mainWorktree(cwd) {
 }
 
 /**
+ * Run an `ls-files` query with -z. Without it git escapes any path holding a
+ * non-ASCII or unusual character and wraps the whole thing in quotes, and such
+ * a name then matches no glob and drops out of every result unannounced.
+ */
+function listFiles(repoRoot, args) {
+  return git(repoRoot, ["ls-files", "-z", ...args])
+    .split("\0")
+    .filter(Boolean);
+}
+
+/**
  * Paths git does not track: untracked and ignored entries, with wholly ignored
  * directories collapsed to a single trailing-slash entry.
  */
 export function ignoredEntries(repoRoot) {
-  const stdout = git(repoRoot, [
-    "ls-files",
-    "--others",
-    "--ignored",
-    "--exclude-standard",
-    "--directory",
-  ]);
-  return stdout.split(/\r?\n/).filter(Boolean);
+  return listFiles(repoRoot, ["--others", "--ignored", "--exclude-standard", "--directory"]);
 }
 
 /** Paths git has under version control, relative to the repository root. */
 export function trackedFiles(repoRoot) {
-  return git(repoRoot, ["ls-files"]).split(/\r?\n/).filter(Boolean);
+  return listFiles(repoRoot, []);
 }
 
 /** Whether git ignores `relativePath`, used to vet paths found on disk. */

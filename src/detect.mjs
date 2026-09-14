@@ -16,6 +16,8 @@ export const DEFAULT_PATTERNS = [
   "**/local.properties",
   "**/*.tfvars",
   "**/*.tfvars.json",
+  "config/master.key",
+  "config/credentials/*.key",
 ];
 
 // Suffixes that mark a committed placeholder rather than real configuration.
@@ -23,7 +25,9 @@ export const EXAMPLE_SUFFIXES = [".example", ".sample", ".template", ".dist", ".
 
 // `git ls-files --directory` collapses a wholly ignored directory into one
 // entry, which hides real config nested inside it. These few well known paths
-// are probed on disk instead, then vetted against git's ignore rules.
+// are probed on disk instead, then vetted against the patterns in force and
+// git's ignore rules. Each one also appears in DEFAULT_PATTERNS, so replacing
+// that list turns the matching probe off along with it.
 export const NESTED_PROBES = ["config/master.key", "config/credentials/*.key"];
 
 const toPosix = (value) => value.replaceAll("\\", "/");
@@ -64,6 +68,7 @@ export function detectFiles(repoRoot, { patterns = DEFAULT_PATTERNS, exclude = [
     for (const hit of hits) {
       const relative = toPosix(hit);
       if (isExample(relative)) continue;
+      if (!matchesAny(relative, patterns)) continue;
       if (isIgnored(repoRoot, relative)) found.add(relative);
     }
   }

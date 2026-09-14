@@ -49,6 +49,22 @@ test("probes known nested secrets that git collapsed away", () => {
   assert.deepEqual(detectFiles(repo), ["config/credentials/production.key", "config/master.key"]);
 });
 
+test("finds a config file whose name is not plain ASCII", () => {
+  const repo = makeRepo({}, { gitignore: ".env*\n" });
+  write(repo, ".env.local", "A=1");
+  write(repo, ".env.caf\u00e9", "B=1");
+
+  assert.deepEqual(detectFiles(repo), [".env.caf\u00e9", ".env.local"]);
+});
+
+test("a replaced pattern list also turns the nested probes off", () => {
+  const repo = makeRepo({}, { gitignore: "config/master.key\nsecrets.yaml\n" });
+  write(repo, "config/master.key", "abc");
+  write(repo, "secrets.yaml", "token: 1");
+
+  assert.deepEqual(detectFiles(repo, { patterns: ["**/secrets.yaml"] }), ["secrets.yaml"]);
+});
+
 test("exclude trims the auto-detected list", () => {
   const repo = makeRepo({}, { gitignore: ".env*\n" });
   write(repo, ".env", "A=1");
