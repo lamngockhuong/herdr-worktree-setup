@@ -39,18 +39,15 @@ export function printReport(results) {
 }
 
 /**
- * Show a Herdr toast. Best effort on purpose: a missing server or CLI must not
- * turn a successful setup into a failed hook.
+ * Show a Herdr toast. Best effort on purpose: spawnSync reports a missing server
+ * or CLI in its return value, which we ignore, so nothing here can turn a
+ * successful setup into a failed hook. The log already carries the full report.
  */
 export function notify(title, body, env = process.env) {
   const bin = env.HERDR_BIN_PATH || "herdr";
-  try {
-    spawnSync(bin, ["notification", "show", title, "--body", body], {
-      encoding: "utf8",
-      timeout: 5000,
-      windowsHide: true,
-    });
-  } catch {
-    // Ignore: the log already carries the full report.
-  }
+  spawnSync(bin, ["notification", "show", title, "--body", body], {
+    encoding: "utf8",
+    timeout: 5000,
+    windowsHide: true,
+  });
 }
