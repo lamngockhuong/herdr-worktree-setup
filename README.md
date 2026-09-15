@@ -14,7 +14,7 @@ Runs on Linux, macOS, and Windows. No dependencies beyond Node and git.
 herdr plugin install lamngockhuong/herdr-worktree-setup
 ```
 
-Requirements: Herdr 0.7.0+, Node 22.5+ on `PATH`, git.
+Requirements: Herdr 0.7.0+, git, and Node 22.5+ on the `PATH` of whatever process runs the Herdr server — not merely on your shell's. A server started at login by systemd or launchd usually has a narrower one; [Nothing ran at all](#nothing-ran-at-all) covers the symptom and the fix.
 
 Nothing else to do. Create a worktree and watch the toast:
 
@@ -142,6 +142,38 @@ Every run writes a full report — one line per file, with the reason for each s
 ```bash
 herdr plugin log list --plugin lamngockhuong.worktree-setup --limit 20
 ```
+
+### Nothing ran at all
+
+A failed entry with no output of its own is not the plugin reporting a problem — it is the plugin never having started:
+
+```json
+{"command":["node","src/index.mjs"],"error":"No such file or directory (os error 2)",
+ "event":"worktree.created","status":"failed"}
+```
+
+The missing file is `node`. Herdr runs plugin commands with the environment of the *server* process, and a server launched at login by systemd or launchd inherits a minimal `PATH` instead of your shell's. Volta, nvm, fnm, and asdf all install node outside that `PATH`, so the hook dies before one line of it runs. Nothing surfaces in the UI: no toast, no error, just a worktree missing its config files. The plugin log is the only place it shows.
+
+Compare what each side sees:
+
+```bash
+which node                                                   # your shell
+systemctl --user show -p Environment homebrew.herdr.service  # the server
+```
+
+On Linux, hand the unit a usable `PATH` — substitute your own unit name, which a Homebrew install spells `homebrew.herdr.service`:
+
+```bash
+mkdir -p ~/.config/systemd/user/homebrew.herdr.service.d
+cat > ~/.config/systemd/user/homebrew.herdr.service.d/path.conf <<EOF
+[Service]
+Environment=PATH=$(dirname "$(command -v node)"):/usr/local/bin:/usr/bin:/bin
+EOF
+systemctl --user daemon-reload
+systemctl --user restart homebrew.herdr.service
+```
+
+On macOS, set the same variable on the launch agent — an `EnvironmentVariables` dictionary holding `PATH` in its plist, or `launchctl setenv PATH ...` before the agent starts.
 
 You can also run the hook by hand against any checkout:
 
