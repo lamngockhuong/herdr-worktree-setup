@@ -1,5 +1,7 @@
 # Herdr Worktree Setup
 
+**English** · [Tiếng Việt](README.vi.md)
+
 A [Herdr](https://herdr.dev) plugin that prepares every worktree Herdr creates.
 
 `git worktree add` gives you a clean checkout of tracked files — and nothing else. The `.env` you spent an afternoon filling in stays behind in the main checkout, so the first thing a new worktree does is fail to boot. This plugin closes that gap on the `worktree.created` event.
