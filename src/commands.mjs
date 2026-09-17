@@ -6,6 +6,14 @@ import { render } from "./template.mjs";
 
 export const TRUST_FILENAME = "trusted-repos.txt";
 
+/**
+ * Where the trust list lives. Both the run that skips a block and the preview
+ * that says it would are quoting a file the reader now has to edit, so both
+ * name it the same way rather than one of them naming it by filename alone.
+ */
+export const trustListPath = (configDir) =>
+  join(configDir ?? "<plugin config dir>", TRUST_FILENAME);
+
 const IS_WINDOWS = process.platform === "win32";
 
 // `post_create` and `post_remove` run commands that a repository chose.
@@ -16,7 +24,7 @@ const IS_WINDOWS = process.platform === "win32";
 export function readTrustList(configDir) {
   if (!configDir) return [];
   try {
-    return readFileSync(join(configDir, TRUST_FILENAME), "utf8")
+    return readFileSync(trustListPath(configDir), "utf8")
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line !== "" && !line.startsWith("#"));
@@ -117,7 +125,7 @@ export function runCommands(
   if (!trustedForCommands(repoRoot, configDir, env)) {
     const detail =
       `repository is not trusted for commands. To allow it, add this line to ` +
-      `${join(configDir ?? "<plugin config dir>", TRUST_FILENAME)}: ${repoRoot}`;
+      `${trustListPath(configDir)}: ${repoRoot}`;
     return [result(action, repoRoot, "skipped", detail)];
   }
 

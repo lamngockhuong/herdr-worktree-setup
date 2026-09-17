@@ -48,6 +48,24 @@ export function printReport(results) {
   }
 }
 
+/** A toast names the branch it is about, when the run knew one. */
+const body = (line, branch) => (branch ? `${branch}: ${line}` : line);
+
+/** The toast a finished setup deserves, which is one either way. */
+export const setupToast = (summary, line, branch) => ({
+  title: summary.failed > 0 ? "Worktree setup incomplete" : "Worktree ready",
+  body: body(line, branch),
+});
+
+/**
+ * The toast a finished teardown deserves, or null when it deserves none. Only
+ * failure is worth one: the worktree is gone and the person has moved on, so a
+ * notification saying the cleanup went fine interrupts for nothing, while one
+ * saying it did not is how they learn a container is still running.
+ */
+export const cleanupToast = (summary, line, branch) =>
+  summary.failed > 0 ? { title: "Worktree cleanup incomplete", body: body(line, branch) } : null;
+
 /**
  * Show a Herdr toast. Best effort on purpose: a missing server or CLI comes
  * back in the return value, which we ignore, so nothing here can turn a

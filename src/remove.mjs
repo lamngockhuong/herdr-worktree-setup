@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { runCommands } from "./commands.mjs";
 import { loadConfig } from "./config.mjs";
 import { readContext } from "./context.mjs";
-import { notify, printReport, summarize, summaryLine } from "./report.mjs";
+import { cleanupToast, notify, printReport, summarize, summaryLine } from "./report.mjs";
 import { worktreeVariables } from "./template.mjs";
 
 /**
@@ -47,13 +47,8 @@ export function run(env = process.env) {
   const line = summaryLine(summary);
   console.log(line);
 
-  // Only failure is worth a toast. The worktree is gone and the workspace is
-  // closing, so a notification saying the cleanup went fine interrupts someone
-  // who has already moved on; one saying it did not is how they learn a
-  // container is still running.
-  if (config.notify && summary.failed > 0) {
-    notify("Worktree cleanup incomplete", branch ? `${branch}: ${line}` : line, env);
-  }
+  const toast = config.notify ? cleanupToast(summary, line, branch) : null;
+  if (toast) notify(toast.title, toast.body, env);
 
   return summary.failed > 0 ? 1 : 0;
 }

@@ -3,11 +3,11 @@
 
 import { pathToFileURL } from "node:url";
 import { copyEntry, exampleSeeds, seedFromExamples, symlinkEntry } from "./apply.mjs";
-import { runCommands, TRUST_FILENAME, trustedForCommands } from "./commands.mjs";
+import { runCommands, trustedForCommands, trustListPath } from "./commands.mjs";
 import { CONFIG_FILENAME, loadConfig } from "./config.mjs";
 import { readContext, resolveTarget } from "./context.mjs";
 import { detectFiles } from "./detect.mjs";
-import { notify, printReport, summarize, summaryLine } from "./report.mjs";
+import { notify, printReport, setupToast, summarize, summaryLine } from "./report.mjs";
 import { render, worktreeVariables } from "./template.mjs";
 
 function collectCopyTargets(repoRoot, config) {
@@ -45,10 +45,12 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env) {
     !trustedForCommands(repoRoot, env.HERDR_PLUGIN_CONFIG_DIR, env)
   ) {
     // Said before the commands, so the lines below read as what they resolve
-    // to rather than as a promise that any of them would run.
+    // to rather than as a promise that any of them would run. The trust file is
+    // named in full, because a preview that says a repository is untrusted and
+    // leaves the reader to find the file is a preview they have to follow up.
     console.log(
       `the commands below are shown rendered but would be skipped: ${repoRoot} ` +
-        `is not listed in ${TRUST_FILENAME}`,
+        `is not listed in ${trustListPath(env.HERDR_PLUGIN_CONFIG_DIR)}`,
     );
   }
 
@@ -121,8 +123,8 @@ export function run(env = process.env, argv = []) {
   console.log(line);
 
   if (config.notify) {
-    const title = summary.failed > 0 ? "Worktree setup incomplete" : "Worktree ready";
-    notify(title, branch ? `${branch}: ${line}` : line, env);
+    const { title, body } = setupToast(summary, line, branch);
+    notify(title, body, env);
   }
 
   return summary.failed > 0 ? 1 : 0;
