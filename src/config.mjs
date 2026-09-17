@@ -1,37 +1,28 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_PATTERNS } from "./detect.mjs";
+import { DEFAULT_PATTERNS, toPosix } from "./detect.mjs";
 import { parseToml } from "./toml.mjs";
 
 export const CONFIG_FILENAME = ".herdr-worktree.toml";
 
-export const DEFAULTS = {
-  auto_detect: true,
-  patterns: DEFAULT_PATTERNS,
-  copy: [],
-  symlink: [],
-  exclude: [],
-  seed_from_example: false,
-  post_create: [],
-  post_create_timeout_ms: 600000,
-  notify: true,
+// One row per key: what it accepts, what it is worth when absent, and whether
+// it names paths inside the repository. Everything below reads this table, so
+// adding a key is one edit rather than three that have to agree.
+const KEYS = {
+  auto_detect: { type: "boolean", default: true },
+  patterns: { type: "string[]", default: DEFAULT_PATTERNS },
+  copy: { type: "string[]", default: [], path: true },
+  symlink: { type: "string[]", default: [], path: true },
+  exclude: { type: "string[]", default: [] },
+  seed_from_example: { type: "boolean", default: false },
+  post_create: { type: "string[]", default: [] },
+  post_create_timeout_ms: { type: "integer", default: 600000 },
+  notify: { type: "boolean", default: true },
 };
 
-const SCHEMA = {
-  auto_detect: "boolean",
-  patterns: "string[]",
-  copy: "string[]",
-  symlink: "string[]",
-  exclude: "string[]",
-  seed_from_example: "boolean",
-  post_create: "string[]",
-  post_create_timeout_ms: "integer",
-  notify: "boolean",
-};
-
-// Entries name paths inside the repository. Anything absolute or climbing out
-// of it is a mistake worth reporting rather than resolving.
-const PATH_KEYS = ["copy", "symlink"];
+export const DEFAULTS = Object.fromEntries(
+  Object.entries(KEYS).map(([key, spec]) => [key, spec.default]),
+);
 
 class ConfigError extends Error {
   constructor(message) {
@@ -54,34 +45,37 @@ function checkType(key, value, type) {
   }
 }
 
+// Entries name paths inside the repository. Anything absolute or climbing out
+// of it is a mistake worth reporting rather than resolving. The POSIX spelling
+// every caller wants is produced here, so no consumer has to convert again.
 function checkPath(key, value) {
-  const posix = value.replaceAll("\\", "/");
+  const posix = toPosix(value);
   if (posix === "" || posix.startsWith("/") || /^[A-Za-z]:/.test(posix)) {
     throw new ConfigError(`${key} entry must be relative to the repository root: ${value}`);
   }
   if (posix.split("/").includes("..")) {
     throw new ConfigError(`${key} entry must stay inside the repository: ${value}`);
   }
+  return posix;
 }
 
 /** Validate a parsed config object and fill in every default. */
 export function normalizeConfig(raw) {
-  const unknown = Object.keys(raw).filter((key) => !Object.hasOwn(SCHEMA, key));
+  const unknown = Object.keys(raw).filter((key) => !Object.hasOwn(KEYS, key));
   if (unknown.length > 0) {
     throw new ConfigError(
-      `unknown key(s): ${unknown.join(", ")}. Valid keys: ${Object.keys(SCHEMA).join(", ")}`,
+      `unknown key(s): ${unknown.join(", ")}. Valid keys: ${Object.keys(KEYS).join(", ")}`,
     );
   }
 
-  for (const [key, type] of Object.entries(SCHEMA)) {
-    if (Object.hasOwn(raw, key)) checkType(key, raw[key], type);
+  const config = { ...DEFAULTS, ...raw };
+
+  for (const [key, spec] of Object.entries(KEYS)) {
+    if (Object.hasOwn(raw, key)) checkType(key, raw[key], spec.type);
+    if (spec.path) config[key] = config[key].map((entry) => checkPath(key, entry));
   }
 
-  for (const key of PATH_KEYS) {
-    for (const entry of raw[key] ?? []) checkPath(key, entry);
-  }
-
-  return { ...DEFAULTS, ...raw };
+  return config;
 }
 
 /**

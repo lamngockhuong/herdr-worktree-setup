@@ -1,11 +1,10 @@
 import { cpSync, lstatSync, mkdirSync, readlinkSync, statSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { EXAMPLE_SUFFIXES, isExample, matchesAny } from "./detect.mjs";
+import { exampleTarget, matchesAny } from "./detect.mjs";
 import { trackedFiles } from "./git.mjs";
+import { result } from "./report.mjs";
 
 const IS_WINDOWS = process.platform === "win32";
-
-const result = (action, path, status, detail) => ({ action, path, status, detail });
 
 // Deliberately lstat: a symlink whose destination is missing is still a path
 // worth reproducing, and a target that already exists is left alone because the
@@ -22,11 +21,7 @@ function pathExists(path) {
 // Follows links on purpose: only Windows cares, and there a link to a directory
 // needs a junction. A dangling link falls back to the file form.
 function isDirectory(path) {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
+  return statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
 }
 
 function ensureParent(path) {
@@ -59,47 +54,42 @@ function writeLink(destination, target, content) {
   }
 }
 
-/** Copy one repo-relative path from the main worktree into the new checkout. */
-export function copyEntry(repoRoot, worktreePath, relative) {
+/**
+ * Put one repo-relative path into the new checkout. Every action that does so
+ * answers the same two questions first, and `write` returns the detail line for
+ * whatever it did.
+ */
+function placeEntry(action, repoRoot, worktreePath, relative, write) {
   const source = join(repoRoot, relative);
   const target = join(worktreePath, relative);
 
-  if (!pathExists(source)) return result("copy", relative, "skipped", "source is missing");
-  if (pathExists(target)) return result("copy", relative, "skipped", "already in the worktree");
+  if (!pathExists(source)) return result(action, relative, "skipped", "source is missing");
+  if (pathExists(target)) return result(action, relative, "skipped", "already in the worktree");
 
-  return attempt("copy", relative, () => {
+  return attempt(action, relative, () => {
     ensureParent(target);
+    return result(action, relative, "done", write(source, target));
+  });
+}
+
+/** Copy one repo-relative path from the main worktree into the new checkout. */
+export function copyEntry(repoRoot, worktreePath, relative) {
+  return placeEntry("copy", repoRoot, worktreePath, relative, (source, target) => {
     // cpSync refuses a link whose destination does not exist, even with
     // verbatimSymlinks, so a link is rebuilt from what it points at instead.
     if (lstatSync(source).isSymbolicLink()) {
-      return result("copy", relative, "done", writeLink(readlinkSync(source), target, source));
+      return writeLink(readlinkSync(source), target, source);
     }
     cpSync(source, target, { recursive: true, verbatimSymlinks: true });
-    return result("copy", relative, "done");
+    return undefined;
   });
 }
 
 /** Link one repo-relative path back to the main worktree. */
 export function symlinkEntry(repoRoot, worktreePath, relative) {
-  const source = join(repoRoot, relative);
-  const target = join(worktreePath, relative);
-
-  if (!pathExists(source)) return result("symlink", relative, "skipped", "source is missing");
-  if (pathExists(target)) {
-    return result("symlink", relative, "skipped", "already in the worktree");
-  }
-
-  return attempt("symlink", relative, () => {
-    ensureParent(target);
-    return result("symlink", relative, "done", writeLink(source, target, source));
-  });
-}
-
-/** Strip a placeholder suffix, so `.env.local.example` becomes `.env.local`. */
-export function exampleTarget(relative) {
-  const lower = relative.toLowerCase();
-  const suffix = EXAMPLE_SUFFIXES.find((candidate) => lower.endsWith(candidate));
-  return suffix ? relative.slice(0, -suffix.length) : null;
+  return placeEntry("symlink", repoRoot, worktreePath, relative, (source, target) =>
+    writeLink(source, target, source),
+  );
 }
 
 /**
@@ -110,8 +100,6 @@ export function exampleTarget(relative) {
 export function exampleSeeds(worktreePath, patterns) {
   const seeds = [];
   for (const tracked of trackedFiles(worktreePath)) {
-    if (!isExample(tracked)) continue;
-
     const target = exampleTarget(tracked);
     if (!target || !matchesAny(target, patterns)) continue;
     if (pathExists(join(worktreePath, target))) continue;

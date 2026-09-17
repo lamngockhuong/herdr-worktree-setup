@@ -19,10 +19,11 @@
   "engines": {
     "node": ">=22.5.0"
   },
+  "packageManager": "pnpm@11.10.0",
   "scripts": {
     "test": "node --test",
-    "lint": "npx --yes @biomejs/biome@2.5.6 check .",
-    "lint:fix": "npx --yes @biomejs/biome@2.5.6 check --write .",
-    "check": "npm run lint && npm test"
+    "lint": "pnpm dlx @biomejs/biome@2.5.6 check .",
+    "lint:fix": "pnpm dlx @biomejs/biome@2.5.6 check --write .",
+    "check": "pnpm lint && pnpm test"
   }
 }

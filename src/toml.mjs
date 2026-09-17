@@ -26,21 +26,32 @@ class TomlError extends Error {
   }
 }
 
-// Cut a trailing `#` comment off a line without touching a `#` inside a string.
-function stripComment(line) {
+// Walk `text`, tracking which quote we are inside and how deep into an array,
+// and hand `visit` every character that sits outside a string. Returning true
+// from `visit` stops the walk. Knowing where a string starts and ends is the
+// one rule three readers below share, so it is written once here.
+function scan(text, visit) {
   let quote = null;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
     if (quote) {
       if (ch === "\\" && quote === '"') i++;
       else if (ch === quote) quote = null;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-    } else if (ch === "#") {
-      return line.slice(0, i);
+      continue;
     }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "[") depth++;
+    else if (ch === "]") depth--;
+    else if (visit?.(ch, i, depth)) return { quote, depth, stopped: i };
   }
-  return line;
+  return { quote, depth, stopped: -1 };
+}
+
+// Cut a trailing `#` comment off a line without touching a `#` inside a string.
+function stripComment(line) {
+  const { stopped } = scan(line, (ch) => ch === "#");
+  return stopped === -1 ? line : line.slice(0, stopped);
 }
 
 function parseBasicString(raw, lineNo) {
@@ -71,24 +82,13 @@ function parseBasicString(raw, lineNo) {
 // Split the inside of an array on commas that sit outside any string.
 function splitArrayItems(body, lineNo) {
   const items = [];
-  let depth = 0;
-  let quote = null;
   let start = 0;
-  for (let i = 0; i < body.length; i++) {
-    const ch = body[i];
-    if (quote) {
-      if (ch === "\\" && quote === '"') i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === "[") depth++;
-    else if (ch === "]") depth--;
-    else if (ch === "," && depth === 0) {
-      items.push(body.slice(start, i));
-      start = i + 1;
-    }
-  }
+  const { quote } = scan(body, (ch, i, depth) => {
+    if (ch !== "," || depth !== 0) return false;
+    items.push(body.slice(start, i));
+    start = i + 1;
+    return false;
+  });
   if (quote) throw new TomlError("unterminated string in array", lineNo);
   items.push(body.slice(start));
   return items.map((item) => item.trim()).filter((item) => item !== "");
@@ -128,20 +128,7 @@ function parseValue(raw, lineNo) {
 
 // True while an array literal is still open, so the reader keeps joining lines.
 function isIncomplete(text) {
-  let depth = 0;
-  let quote = null;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (quote) {
-      if (ch === "\\" && quote === '"') i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === "[") depth++;
-    else if (ch === "]") depth--;
-  }
-  return depth > 0;
+  return scan(text).depth > 0;
 }
 
 /**

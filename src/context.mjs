@@ -19,6 +19,16 @@ export function pluginContext(env = process.env) {
 }
 
 /**
+ * Where to look when no event names a worktree: the workspace Herdr says is
+ * open, then the focused pane, then the current directory. `src/index.mjs` and
+ * `src/init.mjs` both resolve a repository from this, and must agree on it.
+ */
+export function contextCwd(env = process.env) {
+  const context = pluginContext(env);
+  return context?.workspace_cwd ?? context?.focused_pane_cwd ?? process.cwd();
+}
+
+/**
  * Resolve the new checkout and the repository it came from, from the plugin
  * environment. Throws when neither blob names a worktree, which is the only
  * case the hook cannot recover from.
@@ -46,6 +56,5 @@ export function readContext(env = process.env) {
     worktreePath,
     repoRoot,
     branch: context?.worktree?.branch ?? event?.worktree?.branch ?? null,
-    repoName: context?.worktree?.repo_name ?? event?.workspace?.worktree?.repo_name ?? null,
   };
 }

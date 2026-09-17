@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CONFIG_FILENAME, DEFAULTS } from "./config.mjs";
-import { pluginContext } from "./context.mjs";
+import { contextCwd, pluginContext } from "./context.mjs";
 import { detectFiles } from "./detect.mjs";
 import { repoRootFrom } from "./git.mjs";
 
@@ -26,8 +26,7 @@ export function resolveRepoRoot(env = process.env, argv = []) {
   const context = pluginContext(env);
   if (context?.worktree?.repo_root) return context.worktree.repo_root;
 
-  const cwd = context?.workspace_cwd ?? context?.focused_pane_cwd ?? process.cwd();
-  return repoRootFrom(cwd);
+  return repoRootFrom(contextCwd(env));
 }
 
 /**
