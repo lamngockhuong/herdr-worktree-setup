@@ -12,6 +12,13 @@ description = "Write a starter config into this repository, listing what the plu
 contexts = ["workspace"]
 command = ["node", "src/init.mjs"]
 
+[[actions]]
+id = "dry-run"
+title = "Preview worktree setup"
+description = "Print what the plugin would copy, link, seed and run here, without doing any of it"
+contexts = ["workspace"]
+command = ["node", "src/index.mjs", "--dry-run"]
+
 [[events]]
 on = "worktree.created"
 command = ["node", "src/index.mjs"]

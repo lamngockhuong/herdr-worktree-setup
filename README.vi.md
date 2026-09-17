@@ -87,7 +87,7 @@ exclude = ["**/.env.ci"]
 seed_from_example = false
 
 # Các lệnh chạy trong worktree mới. Cần được tin cậy — xem bên dưới.
-post_create = ["pnpm install"]
+post_create = ["pnpm install", "pnpm dev --port {{ branch | hash_port }}"]
 post_create_timeout_ms = 600000
 
 # Hiện thông báo Herdr khi chạy xong.
@@ -127,7 +127,70 @@ Mỗi dòng một đường dẫn tuyệt đối; dấu `#` mở đầu phần c
 
 `HERDR_WORKTREE_SETUP_TRUST_ALL=1` tắt hẳn lớp chặn này. Chỉ đặt biến đó nếu mọi repository bạn mở đều do chính bạn viết.
 
-Các lệnh chạy qua shell của hệ điều hành, trong worktree mới, và dừng ngay ở lệnh đầu tiên thất bại.
+Các lệnh chạy trong worktree mới và dừng ngay ở lệnh đầu tiên thất bại. Shell đứng sau chúng là `/bin/sh` trên Linux và macOS, còn trên Windows là **PowerShell** — `powershell.exe -NoProfile -NonInteractive`, không phải `cmd.exe`. Profile PowerShell của bạn cố tình không được nạp, nhờ vậy hook luôn thấy cùng một môi trường bất kể ai chạy nó.
+
+Ai đang dùng Windows và nâng cấp từ 0.1.0 nên đọc lại khối `post_create` của mình, vì shell bên dưới đã đổi:
+
+- `&&` và `||` là lỗi cú pháp trong Windows PowerShell 5.1. Hãy tách `"pnpm i && pnpm build"` thành hai mục; chuỗi lệnh vốn đã dừng ở lệnh đầu tiên thất bại rồi.
+- Các lệnh nội trú của `cmd` như `set`, `copy`, `del` không còn. PowerShell có bộ lệnh riêng.
+- Lệnh thất bại luôn được báo là `exit code 1`, bất kể nó thoát với số nào. PowerShell chỉ chuyển tiếp trạng thái của chính nó, trừ khi chuỗi lệnh kết thúc bằng `exit $LASTEXITCODE`, mà thêm câu đó vào lại báo *thành công* sai khi thứ chạy sau cùng là một cmdlet. Dù sao thất bại vẫn bị phát hiện; chỉ có con số là mất.
+
+## Biến trong lệnh
+
+Mỗi mục trong `post_create` đều có thể mang những chỗ điền dạng `{{ biến }}`. Đây chính là thứ cho phép hai worktree của cùng một repository chạy song song thay vì giành nhau một cổng hay một tên container:
+
+```toml
+post_create = [
+  "pnpm install",
+  "docker compose -p {{ repo_name }}-{{ branch | sanitize }} up -d",
+  "pnpm dev --port {{ branch | hash_port }}",
+]
+```
+
+| Biến | Giá trị |
+| --- | --- |
+| `branch` | nhánh đang được checkout trong worktree mới |
+| `worktree_path` | đường dẫn tuyệt đối của checkout mới |
+| `worktree_name` | đoạn cuối của đường dẫn đó |
+| `repo_path` | đường dẫn tuyệt đối của checkout chính |
+| `repo_name` | đoạn cuối của đường dẫn đó |
+
+Mỗi chỗ điền nhận tối đa một bộ lọc, viết sau dấu `|`:
+
+| Bộ lọc | Tác dụng | `feature/checkout` thành |
+| --- | --- | --- |
+| `sanitize` | đổi `/` và `\` thành `-` | `feature-checkout` |
+| `hash` | ba ký tự base36 lấy từ một digest | `l22` |
+| `hash_port` | một cổng trong khoảng 10000–19999 | `13706` |
+
+`hash` và `hash_port` chỉ phụ thuộc vào tên nhánh, nên một nhánh luôn nhận đúng cổng đó ở mọi lần chạy, còn hai nhánh khác nhau thì nhận hai cổng khác nhau. Cách tính hai giá trị này không được đổi tùy tiện: đổi thì cổng của mọi worktree đang có cũng dịch theo, nên đó là thay đổi phá vỡ tương thích chứ không phải một bản sửa lỗi.
+
+Ba điều đáng nhớ:
+
+- **Giá trị thay vào luôn được bọc nháy cho shell.** `--port {{ branch | hash_port }}` đến tay shell dưới dạng `--port '13706'`. Lệnh chỉ đọc argv thì không thấy khác gì, nhưng lệnh nào tự cắt chuỗi nhận được sẽ thấy cả dấu nháy. Chính lớp bọc này khiến một nhánh tên `a;rm -rf ~` không còn là một câu lệnh: git chấp nhận cái tên đó, và plugin đưa nó sang lệnh như một tham số nguyên vẹn trên mọi nền tảng. Phần chữ còn lại của câu lệnh là của bạn và được giữ nguyên.
+- **Không chỗ nào hiện ra rỗng.** Một tên biến lạ, một bộ lọc viết sai, hay một `{{` thiếu `}}` đều làm lệnh đó thất bại kèm lời giải thích. `{{ branch }}` trong một worktree đang ở detached HEAD cũng vậy, vì ở đó không có nhánh nào: một câu lệnh dựng quanh cái cổng đã biến mất còn tệ hơn một câu lệnh từ chối chạy.
+- **Đừng tự bọc nháy quanh một chỗ điền.** `--name "{{ branch | sanitize }}"` đưa cho lệnh chuỗi `"'feature-a'"`, kèm luôn dấu nháy. Plugin đã bọc nháy sẵn rồi.
+- **Dấu ngoặc của công cụ khác được giữ nguyên.** Plugin chỉ nhận những biểu thức trông giống một tên biến, chẳng hạn `{{ branch }}` hay `{{ branch | hash_port }}`. `docker ps --format '{{.Names}}'` cùng các mẫu Go hay Helm đi qua đúng như đã viết.
+- **Chỉ các lệnh mới nhận biến.** `copy`, `symlink`, `patterns` và `exclude` giữ nguyên chữ, nhờ vậy một đường dẫn sai bị bắt ngay lúc đọc cấu hình chứ không phải giữa chừng.
+
+## Xem trước những gì sẽ xảy ra
+
+```bash
+herdr plugin action invoke lamngockhuong.worktree-setup.dry-run
+```
+
+Lệnh này in ra cả lượt chạy mà không làm gì cả: không tạo link, không chép, không dựng file từ mẫu, không chạy lệnh nào.
+
+```
+dry run: nothing is linked, copied, seeded or executed
+would link shared
+would copy apps/api/.env.local
+would run  pnpm dev --port '13706'
+```
+
+Các lệnh hiện ra đã thay biến và bọc nháy đúng như khi đến tay shell, và đó là cách nhanh nhất để thấy một chỗ điền cho ra giá trị gì. Những dòng link, chép và dựng từ mẫu là danh sách đích đã được xác định, không phải lời hứa rằng từng cái sẽ thành công. Một chỗ điền không thay được sẽ được báo ra và lượt chạy kết thúc với mã khác 0.
+
+Ngoài Herdr, `node src/index.mjs --dry-run /đường/dẫn/worktree` cho kết quả tương tự; nếu không đưa đường dẫn, plugin dùng workspace mà Herdr đang mở, hoặc thư mục hiện tại.
 
 ## Chép hay tạo link?
 

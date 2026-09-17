@@ -1,8 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { render } from "./template.mjs";
 
 export const TRUST_FILENAME = "trusted-repos.txt";
+
+const IS_WINDOWS = process.platform === "win32";
 
 // `post_create` runs commands that a repository chose. Cloning someone's
 // project and opening a worktree must not be enough to execute them, so the
@@ -40,10 +43,49 @@ export function isTrusted(repoRoot, trusted, env = process.env) {
 }
 
 /**
- * Run each configured command in the new checkout, stopping at the first
- * failure so a broken install does not cascade into confusing follow-up errors.
+ * Run one rendered command. Windows goes through PowerShell rather than the
+ * `cmd.exe` that `shell: true` would pick: a single-quoted PowerShell string is
+ * literal, which is what makes the escaping in `template.mjs` complete, and
+ * `cmd.exe` cannot carry `%` or `!` safely inside a quoted argument. Spawning
+ * the executable directly rather than passing `shell: "powershell.exe"` keeps
+ * the user's PowerShell profile from running inside a hook and changing the
+ * environment the commands see.
  */
-export function runPostCreate(worktreePath, commands, { timeoutMs, configDir, repoRoot, env }) {
+function spawnCommand(command, cwd, timeoutMs) {
+  const options = { cwd, encoding: "utf8", timeout: timeoutMs, windowsHide: true };
+  if (!IS_WINDOWS) return spawnSync(command, { ...options, shell: true });
+
+  // Let Node quote the command: PowerShell splits its command line by the same
+  // C runtime rules and then rejoins what follows `-Command` with single
+  // spaces, so one quoted argument survives intact while a verbatim command
+  // line would come back with the author's own quotes eaten and every run of
+  // whitespace collapsed.
+  const args = ["-NoProfile", "-NonInteractive", "-Command", command];
+  return spawnSync("powershell.exe", args, options);
+}
+
+// Falling back to `cmd.exe` would pair PowerShell escaping with a shell that
+// reads it differently, which is the injection the escaping exists to prevent.
+function spawnFailure(error) {
+  if (IS_WINDOWS && error.code === "ENOENT") {
+    return (
+      `powershell.exe could not be started (${error.message}). Commands are not ` +
+      "run through cmd.exe, whose quoting this plugin does not escape for"
+    );
+  }
+  return error.message;
+}
+
+/**
+ * Render and run each configured command in the new checkout, stopping at the
+ * first failure so a broken install does not cascade into confusing follow-up
+ * errors.
+ */
+export function runPostCreate(
+  worktreePath,
+  commands,
+  { timeoutMs, configDir, repoRoot, env, vars = {} },
+) {
   if (commands.length === 0) return [];
 
   if (!isTrusted(repoRoot, readTrustList(configDir), env)) {
@@ -61,13 +103,22 @@ export function runPostCreate(worktreePath, commands, { timeoutMs, configDir, re
 
   const results = [];
   for (const command of commands) {
-    const run = spawnSync(command, {
-      cwd: worktreePath,
-      shell: true,
-      encoding: "utf8",
-      timeout: timeoutMs,
-      windowsHide: true,
-    });
+    // Render immediately before running, and report the command that actually
+    // ran rather than the template it came from.
+    let rendered;
+    try {
+      rendered = render(command, vars);
+    } catch (error) {
+      results.push({
+        action: "post_create",
+        path: command,
+        status: "failed",
+        detail: error.message,
+      });
+      break;
+    }
+
+    const run = spawnCommand(rendered, worktreePath, timeoutMs);
 
     const output = `${run.stdout ?? ""}${run.stderr ?? ""}`.trim();
     if (output) console.log(output);
@@ -75,7 +126,7 @@ export function runPostCreate(worktreePath, commands, { timeoutMs, configDir, re
     if (run.error?.code === "ETIMEDOUT") {
       results.push({
         action: "post_create",
-        path: command,
+        path: rendered,
         status: "failed",
         detail:
           `timed out after ${timeoutMs}ms; the shell was killed, but anything it ` +
@@ -86,23 +137,23 @@ export function runPostCreate(worktreePath, commands, { timeoutMs, configDir, re
     if (run.error) {
       results.push({
         action: "post_create",
-        path: command,
+        path: rendered,
         status: "failed",
-        detail: run.error.message,
+        detail: spawnFailure(run.error),
       });
       break;
     }
     if (run.status !== 0) {
       results.push({
         action: "post_create",
-        path: command,
+        path: rendered,
         status: "failed",
         detail: `exit code ${run.status}`,
       });
       break;
     }
 
-    results.push({ action: "post_create", path: command, status: "done" });
+    results.push({ action: "post_create", path: rendered, status: "done" });
   }
   return results;
 }

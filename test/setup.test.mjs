@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { run } from "../src/index.mjs";
-import { TRUST_FILENAME } from "../src/post-create.mjs";
+import { runPostCreate, TRUST_FILENAME } from "../src/post-create.mjs";
+import { worktreeVariables } from "../src/template.mjs";
 import { addWorktree, cleanup, makeRepo, pluginEnv, write } from "./helpers.mjs";
 
 after(cleanup);
@@ -139,4 +141,171 @@ test("reports a failing setup command as a failed run", () => {
 
 test("fails loudly when Herdr passes no worktree at all", () => {
   assert.throws(() => run({}), /no worktree in HERDR_PLUGIN_CONTEXT_JSON/);
+});
+
+// `write-arg.cjs` records the single argument it is given, so a test can prove
+// the branch name arrived as one literal argument instead of being re-parsed by
+// the shell. Every branch below is a name `git check-ref-format` accepts.
+const WRITE_ARG = 'require("node:fs").writeFileSync("arg.txt", process.argv[2] ?? "");';
+
+function repoRunningWriteArg(command) {
+  const repo = makeRepo({ "write-arg.cjs": WRITE_ARG });
+  write(repo, ".herdr-worktree.toml", `post_create = ["${command}"]\nnotify = false`);
+  return repo;
+}
+
+for (const branch of ["a;b", "a`b", "feat/50%", "a!b"]) {
+  test(`a branch named ${branch} reaches the command verbatim`, () => {
+    const repo = repoRunningWriteArg("node write-arg.cjs {{ branch }}");
+    const worktree = addWorktree(repo, branch);
+    const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDirWith(repo) }, branch);
+
+    // A non-zero run would mean the shell split the name and tried to run the
+    // remainder, which is the injection the escaping exists to prevent.
+    assert.equal(run(env), 0);
+    assert.equal(read(worktree, "arg.txt"), branch);
+  });
+}
+
+test("gives one branch the same port every time, and two branches two ports", () => {
+  const repo = repoRunningWriteArg("node write-arg.cjs {{ branch | hash_port }}");
+  const configDir = configDirWith(repo);
+
+  const portFor = (branch) => {
+    const worktree = addWorktree(repo, branch);
+    const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir }, branch);
+    assert.equal(run(env), 0);
+    const first = read(worktree, "arg.txt");
+
+    // The same branch again, so the port cannot drift between two runs of it.
+    assert.equal(run(env), 0);
+    assert.equal(read(worktree, "arg.txt"), first);
+    return first;
+  };
+
+  assert.notEqual(portFor("feature/checkout"), portFor("release/1.0"));
+});
+
+test("fails the command instead of running it with an empty variable", () => {
+  const repo = repoRunningWriteArg("node write-arg.cjs {{ branch }}");
+  const worktree = addWorktree(repo, "detached");
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDirWith(repo) }, null);
+
+  assert.equal(run(env), 1);
+  assert.equal(existsSync(join(worktree, "arg.txt")), false);
+});
+
+test("--dry-run prints the rendered command and touches nothing", () => {
+  const repo = makeRepo({ "write-arg.cjs": WRITE_ARG }, { gitignore: ".env\nshared/\n" });
+  write(repo, ".env", "FROM=main");
+  write(repo, "shared/blob.bin", "big");
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    [
+      'symlink = ["shared"]',
+      'post_create = ["node write-arg.cjs {{ branch | hash_port }}"]',
+      "notify = false",
+    ].join("\n"),
+  );
+  const worktree = addWorktree(repo, "dry");
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDirWith(repo) }, "dry");
+
+  const result = spawnSync(
+    process.execPath,
+    [join(import.meta.dirname, "../src/index.mjs"), "--dry-run"],
+    {
+      env: { ...process.env, ...env },
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /would link shared/);
+  assert.match(result.stdout, /would copy \.env/);
+  assert.match(result.stdout, /would run +node write-arg\.cjs '\d{5}'/);
+
+  assert.equal(existsSync(join(worktree, "arg.txt")), false);
+  assert.equal(existsSync(join(worktree, ".env")), false);
+  assert.equal(existsSync(join(worktree, "shared")), false);
+});
+
+test("--dry-run resolves the worktree from a path argument", () => {
+  const repo = makeRepo({}, { gitignore: ".env\n" });
+  write(repo, ".env", "FROM=main");
+  const worktree = addWorktree(repo, "dry-argv");
+
+  const result = spawnSync(
+    process.execPath,
+    [join(import.meta.dirname, "../src/index.mjs"), "--dry-run", worktree],
+    {
+      env: { ...process.env, HERDR_PLUGIN_CONTEXT_JSON: "", HERDR_PLUGIN_EVENT_JSON: "" },
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /would copy \.env/);
+  assert.equal(existsSync(join(worktree, ".env")), false);
+});
+
+test("a quoted argument in the command survives the shell", () => {
+  const repo = makeRepo({ "write-arg.cjs": WRITE_ARG });
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    ['post_create = ["node write-arg.cjs \\"a b\\""]', "notify = false"].join("\n"),
+  );
+  const worktree = addWorktree(repo, "quoted");
+
+  // A shell handed the command as several arguments instead of one would give
+  // write-arg.cjs only "a" here.
+  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDirWith(repo) })), 0);
+  assert.equal(read(worktree, "arg.txt"), "a b");
+});
+
+test("a command that cannot be rendered stops the ones after it", () => {
+  const repo = makeRepo({
+    "write-arg.cjs": WRITE_ARG,
+    "write-late.cjs": WRITE_ARG.replace("arg.txt", "late.txt"),
+  });
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    [
+      'post_create = ["node write-arg.cjs {{ branch }}", "echo {{ brunch }}", "node write-late.cjs x"]',
+      "notify = false",
+    ].join("\n"),
+  );
+  const worktree = addWorktree(repo, "halting");
+
+  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDirWith(repo) })), 1);
+  assert.equal(read(worktree, "arg.txt"), "feature");
+  assert.equal(existsSync(join(worktree, "late.txt")), false);
+});
+
+test("the report names the command that ran, not the template it came from", () => {
+  const repo = makeRepo({ "write-arg.cjs": WRITE_ARG });
+  const worktree = addWorktree(repo, "reported");
+  const vars = worktreeVariables({
+    worktreePath: worktree,
+    repoRoot: repo,
+    branch: "feature/checkout",
+  });
+
+  const results = runPostCreate(worktree, ["node write-arg.cjs {{ branch | hash_port }}"], {
+    timeoutMs: 60000,
+    configDir: configDirWith(repo),
+    repoRoot: repo,
+    env: {},
+    vars,
+  });
+
+  assert.deepEqual(results, [
+    {
+      action: "post_create",
+      path: "node write-arg.cjs '13706'",
+      status: "done",
+    },
+  ]);
 });

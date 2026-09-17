@@ -44,17 +44,18 @@ export function makeRepo(files = {}, { gitignore = "" } = {}) {
 /** Add a linked worktree and return its path. */
 export function addWorktree(repoRoot, branch = "feature") {
   const path = realpathSync.native(join(repoRoot, ".."));
-  const target = join(path, `${branch}-${Date.now()}`);
+  // A branch name may hold `/`, which would make the directory a nested path.
+  const target = join(path, `${branch.replaceAll("/", "-")}-${Date.now()}`);
   run(repoRoot, ["worktree", "add", "-q", "-b", branch, target]);
   created.push(target);
   return target;
 }
 
 /** Plugin environment as Herdr would set it for a worktree.created hook. */
-export function pluginEnv(repoRoot, worktreePath, extra = {}) {
+export function pluginEnv(repoRoot, worktreePath, extra = {}, branch = "feature") {
   return {
     HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({
-      worktree: { checkout_path: worktreePath, repo_root: repoRoot, branch: "feature" },
+      worktree: { checkout_path: worktreePath, repo_root: repoRoot, branch },
     }),
     HERDR_BIN_PATH: join(repoRoot, "no-such-herdr-binary"),
     ...extra,
