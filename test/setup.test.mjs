@@ -150,16 +150,18 @@ test("reports a failing setup command and stops the ones after it", () => {
 });
 
 test("kills a command that never returns, and says that is what happened", () => {
-  const repo = makeRepo({
-    "hang.cjs": "setInterval(() => {}, 1000);",
-    "write-arg.cjs": writeArgScript(),
-  });
+  // The shell does the waiting itself. A command that spawns a child to wait
+  // for it would leave that child behind when the shell is killed — which is
+  // what the timeout detail warns about, and on Windows it then holds the
+  // fixture directory open until the suite fails trying to delete it.
+  const hang = process.platform === "win32" ? "Start-Sleep -Seconds 30" : "sleep 30";
+  const repo = makeRepo({ "write-arg.cjs": writeArgScript() });
   write(
     repo,
     ".herdr-worktree.toml",
     [
       "post_create_timeout_ms = 1500",
-      'post_create = ["node hang.cjs", "node write-arg.cjs late"]',
+      `post_create = ["${hang}", "node write-arg.cjs late"]`,
       "notify = false",
     ].join("\n"),
   );
@@ -287,10 +289,12 @@ test("the dry run names the trust file in full, as a real run does", () => {
   const real = runEntry("src/index.mjs", [], env);
 
   // Someone told a repository is untrusted has to edit this file, so the
-  // preview must not send them looking for it by filename alone.
+  // preview must not send them looking for it by filename alone. A Windows
+  // path is full of backslashes, so these are substrings rather than patterns.
   const path = join(cfg, TRUST_FILENAME);
-  assert.match(preview.stdout, new RegExp(`would be skipped:.*is not listed in ${path}`));
-  assert.match(real.stdout, new RegExp(`add this line to ${path}: ${repo}`));
+  assert.ok(preview.stdout.includes(`would be skipped`), preview.stdout);
+  assert.ok(preview.stdout.includes(`is not listed in ${path}`), preview.stdout);
+  assert.ok(real.stdout.includes(`add this line to ${path}: ${repo}`), real.stdout);
 });
 
 test("a quoted argument in the command survives the shell", () => {
