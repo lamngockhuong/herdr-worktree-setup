@@ -252,8 +252,8 @@ HERDR_PLUGIN_CONTEXT_JSON='{"worktree":{"checkout_path":"/path/to/worktree","rep
 ```bash
 git clone https://github.com/lamngockhuong/herdr-worktree-setup.git
 cd herdr-worktree-setup
-npm test          # node:test, dựng repository thật trong thư mục tạm
-npm run lint
+pnpm test         # node:test, dựng repository thật trong thư mục tạm
+pnpm lint
 herdr plugin link .
 ```
 
