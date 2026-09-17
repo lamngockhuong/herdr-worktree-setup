@@ -7,10 +7,11 @@ const LABELS = {
   symlink: ["linked", "file"],
   seed: ["seeded", "file"],
   post_create: ["ran", "command"],
+  post_remove: ["ran", "command"],
 };
 
 /**
- * One line of the report. Both `apply.mjs` and `post-create.mjs` produce these,
+ * One line of the report. Both `apply.mjs` and `commands.mjs` produce these,
  * and everything below reads them, so the shape is defined here. A record with
  * nothing to add carries no `detail` key at all rather than an empty one.
  */

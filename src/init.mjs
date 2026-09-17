@@ -73,6 +73,13 @@ ${found}
 # post_create = ["pnpm install", "docker compose -p {{ branch | sanitize }} up -d"]
 # post_create_timeout_ms = ${DEFAULTS.post_create_timeout_ms}
 
+# Commands to run after the worktree is deleted, for whatever post_create
+# started outside it. They run in the repository, because the checkout is
+# already gone, and they carry the same variables and the same trust
+# requirement as post_create.
+# post_remove = ["docker compose -p {{ branch | sanitize }} down -v"]
+# post_remove_timeout_ms = ${DEFAULTS.post_remove_timeout_ms}
+
 # Show a Herdr toast when the run finishes.
 # notify = true
 `;
