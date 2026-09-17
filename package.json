@@ -19,7 +19,7 @@
   "engines": {
     "node": ">=22.5.0"
   },
-  "packageManager": "pnpm@11.10.0",
+  "packageManager": "pnpm@11.27.0",
   "scripts": {
     "test": "node --test",
     "lint": "pnpm dlx @biomejs/biome@2.5.6 check .",
