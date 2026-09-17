@@ -6,7 +6,7 @@ A [Herdr](https://herdr.dev) plugin that prepares every worktree Herdr creates.
 
 `git worktree add` gives you a clean checkout of tracked files — and nothing else. The `.env` you spent an afternoon filling in stays behind in the main checkout, so the first thing a new worktree does is fail to boot. This plugin closes that gap on the `worktree.created` event.
 
-It works with no configuration at all: it finds the config files git is ignoring and copies them across. A repository that wants more can say so in `.herdr-worktree.toml`.
+It works with no configuration at all: it finds the config files git is ignoring and copies them across. A repository that wants more can say so in `.herdr-worktree.toml`, including what to run when a worktree is created and what to tear down when it is removed.
 
 Runs on Linux, macOS, and Windows. No dependencies beyond Node and git.
 
@@ -87,8 +87,12 @@ exclude = ["**/.env.ci"]
 seed_from_example = false
 
 # Commands to run in the new worktree. Requires trust — see below.
-post_create = ["pnpm install", "pnpm dev --port {{ branch | hash_port }}"]
+post_create = ["pnpm install"]
 post_create_timeout_ms = 600000
+
+# Commands to run after the worktree is deleted, in the repository.
+post_remove = ["docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v"]
+post_remove_timeout_ms = 600000
 
 # Show a Herdr toast when the run finishes.
 notify = true
@@ -104,11 +108,15 @@ notify = true
 | `seed_from_example` | boolean | `false` |
 | `post_create` | string list | `[]` |
 | `post_create_timeout_ms` | integer | `600000` |
+| `post_remove` | string list | `[]` |
+| `post_remove_timeout_ms` | integer | `600000` |
 | `notify` | boolean | `true` |
 
 A misspelled key is an error, not a shrug: the plugin names it and lists the valid ones. `copy` and `symlink` entries must stay inside the repository — absolute paths and `..` are rejected.
 
 The file reads a deliberately small slice of TOML: comments, `key = value`, and one level of `[section]` headers, where a value is a boolean, an integer, a string, or a list of those. Anything else fails loudly rather than parsing into silence.
+
+For which of these keys a given repository actually needs — a monorepo, a Rails application, a Terraform workspace — see [docs/recipes.md](docs/recipes.md).
 
 ### `seed_from_example`
 
@@ -116,18 +124,20 @@ Off by default, and that is a judgment call worth explaining. A `.env` full of `
 
 ## Setup commands and trust
 
-`post_create` runs commands the *repository* chose. Cloning someone's project and opening a worktree must never be enough to execute them, so the machine's owner opts each repository in, from outside the repository:
+`post_create` and `post_remove` run commands the *repository* chose. Cloning someone's project and opening a worktree must never be enough to execute them, so the machine's owner opts each repository in, from outside the repository:
 
 ```bash
 herdr plugin config-dir lamngockhuong.worktree-setup
 # append the repository's absolute path to trusted-repos.txt in that directory
 ```
 
-One absolute path per line; `#` starts a comment. Until a repository appears there, its `post_create` block is skipped and the log prints the exact line to add.
+One absolute path per line; `#` starts a comment. Until a repository appears there, both blocks are skipped and the log prints the exact line to add. One list covers both: a repository you trust to set a worktree up is trusted to tear it down again.
 
 `HERDR_WORKTREE_SETUP_TRUST_ALL=1` disables the gate entirely. Set it only if every repository you open is one you wrote.
 
-Commands run in the new worktree, stopping at the first failure. The shell is `/bin/sh` on Linux and macOS, and **PowerShell** on Windows — `powershell.exe -NoProfile -NonInteractive`, not `cmd.exe`. Your PowerShell profile is deliberately not loaded, so a hook sees the same environment whoever runs it.
+Each command runs to completion before the next one starts, and the run stops at the first failure. Nothing is backgrounded for you, so a command that does not exit — a dev server in the foreground — holds the hook until `post_create_timeout_ms` runs out and is then killed and reported as a failure. Start long-running processes yourself, or hand them to something that returns, such as `docker compose up -d`.
+
+The shell is `/bin/sh` on Linux and macOS, and **PowerShell** on Windows — `powershell.exe -NoProfile -NonInteractive`, not `cmd.exe`. Your PowerShell profile is deliberately not loaded, so a hook sees the same environment whoever runs it.
 
 Windows users upgrading from 0.1.0 should re-read their `post_create` block, because the shell changed under it:
 
@@ -137,13 +147,16 @@ Windows users upgrading from 0.1.0 should re-read their `post_create` block, bec
 
 ## Template variables
 
-Every `post_create` entry may carry `{{ variable }}` placeholders, which is what lets two worktrees of the same repository run side by side instead of fighting over one port or one container name:
+Every `post_create` entry may carry `{{ variable }}` placeholders, which is what lets two worktrees of the same repository run side by side instead of fighting over one port or one container name.
+
+Without them, `post_create = ["docker compose up -d"]` works until the day you open a second worktree. Compose names its project after the directory it runs in, both worktrees are named after the same repository, and so the second one quietly adopts the first one's containers instead of starting its own. Naming the project `{{ repo_name }}-{{ branch | sanitize }}` gives each branch a stack of its own, database and all.
+
+Ports collide the same way and take the same fix. `{{ branch | hash_port }}` hands `feature/checkout` 13706 on every run and `fix/login` 18690 on every run, so two branches never ask for one port — whether you pass that number to a container or type it at the dev server you start yourself:
 
 ```toml
 post_create = [
   "pnpm install",
   "docker compose -p {{ repo_name }}-{{ branch | sanitize }} up -d",
-  "pnpm dev --port {{ branch | hash_port }}",
 ]
 ```
 
@@ -165,13 +178,35 @@ One optional filter per placeholder, written after a `|`:
 
 `hash` and `hash_port` are pure functions of the branch name, so a branch claims the same port on every run, and two branches claim different ones. Those numbers are a compatibility surface: changing how they are computed would move every existing worktree's port, so it is treated as a breaking change rather than a fix.
 
-Three rules worth knowing:
+Five rules worth knowing:
 
 - **Substituted values are shell-quoted.** `--port {{ branch | hash_port }}` reaches the shell as `--port '13706'`. Harmless for anything reading argv, but a command doing its own string surgery on what it receives will see the quotes. The quoting is what stops a branch named `a;rm -rf ~` from being an instruction: git accepts that name, and the plugin runs it as one literal argument on every platform. The surrounding command text is yours and is left exactly as written.
 - **Nothing renders as empty.** An unknown variable name, a misspelled filter, and a `{{` with no `}}` each fail the command and name the problem. So does `{{ branch }}` in a detached worktree, which has no branch: a command built from a silently missing port is worse than one that refuses to run.
 - **Do not put your own quotes around a placeholder.** `--name "{{ branch | sanitize }}"` gives the command `"'feature-a'"`, quotes and all. The plugin has already quoted it.
 - **Another tool's braces are left alone.** Only an expression shaped like a variable name, such as `{{ branch }}` or `{{ branch | hash_port }}`, is claimed. `docker ps --format '{{.Names}}'` and a Go or Helm template pass through exactly as written.
 - **Only commands are templated.** `copy`, `symlink`, `patterns` and `exclude` stay literal, so a bad path is caught when the config is read rather than mid-run.
+
+Worked examples — a Compose stack per branch, two dev servers at once, and what each one costs you — are in [docs/recipes.md](docs/recipes.md).
+
+## Tearing down again
+
+Removing a worktree removes files. Whatever `post_create` started outside the checkout — a Compose project, a container, a volume — outlives it, and a week of opening worktrees leaves a machine full of databases nobody is using. `post_remove` runs on Herdr's `worktree.removed` event and is where a repository cleans up after itself:
+
+```toml
+post_create = ["docker compose -p {{ repo_name }}-{{ branch | sanitize }} up -d"]
+post_remove = ["docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v"]
+```
+
+The two entries name the same stack because they are built from the same variables, which is the whole reason the names are derived rather than chosen.
+
+Four differences from `post_create` are worth knowing:
+
+- **The commands run in the repository, not in the worktree.** By the time the event fires the checkout is already deleted, so there is no directory left to run in and nothing there to read. Anything a teardown needs to find, it finds by name.
+- **`{{ branch }}` still works.** It comes from the event Herdr sends, not from a git command in a directory that no longer exists. `{{ worktree_path }}` and `{{ worktree_name }}` still name that directory, which is useful for a resource named after it and useless for reading a file out of it.
+- **Only a failure raises a toast.** You deleted the worktree and have moved on; a notification saying the cleanup went fine would interrupt for nothing, while one saying it did not is how you learn a container is still running. Either way the log has the full report.
+- **Trust is the same gate.** A repository listed in `trusted-repos.txt` gets both blocks; one that is not gets neither.
+
+`post_remove_timeout_ms` bounds the whole block exactly as `post_create_timeout_ms` does, and defaults to the same ten minutes.
 
 ## Seeing what would happen
 
@@ -188,7 +223,7 @@ config .herdr-worktree.toml
 dry run: nothing is linked, copied, seeded or executed
 would link shared
 would copy apps/api/.env.local
-would run  pnpm dev --port '13706'
+would run  docker compose -p 'demo'-'feature-checkout' up -d
 
 press any key to close
 ```

@@ -17,6 +17,8 @@ const KEYS = {
   seed_from_example: { type: "boolean", default: false },
   post_create: { type: "string[]", default: [] },
   post_create_timeout_ms: { type: "integer", default: 600000 },
+  post_remove: { type: "string[]", default: [] },
+  post_remove_timeout_ms: { type: "integer", default: 600000 },
   notify: { type: "boolean", default: true },
 };
 

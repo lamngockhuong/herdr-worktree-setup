@@ -3,11 +3,10 @@
 
 import { pathToFileURL } from "node:url";
 import { copyEntry, exampleSeeds, seedFromExamples, symlinkEntry } from "./apply.mjs";
+import { runCommands, TRUST_FILENAME, trustedForCommands } from "./commands.mjs";
 import { CONFIG_FILENAME, loadConfig } from "./config.mjs";
-import { contextCwd, readContext } from "./context.mjs";
+import { readContext, resolveTarget } from "./context.mjs";
 import { detectFiles } from "./detect.mjs";
-import { currentBranch, mainWorktree, worktreeRoot } from "./git.mjs";
-import { runPostCreate, TRUST_FILENAME, trustedForCommands } from "./post-create.mjs";
 import { notify, printReport, summarize, summaryLine } from "./report.mjs";
 import { render, worktreeVariables } from "./template.mjs";
 
@@ -19,32 +18,6 @@ function collectCopyTargets(repoRoot, config) {
   // Explicit entries win over the exclude list: naming a path is a deliberate
   // choice, while excludes exist to trim what auto-detection guessed.
   return [...new Set([...detected, ...config.copy])];
-}
-
-/**
- * Where `--dry-run` looks when no event is being delivered: an explicit path
- * argument, then the worktree or workspace Herdr says is in focus, then the
- * current directory — the order `src/init.mjs` resolves a repository in.
- */
-function resolveDryRunTarget(env = process.env, argv = []) {
-  const explicit = argv.find((argument) => !argument.startsWith("-"));
-
-  if (!explicit) {
-    try {
-      return readContext(env);
-    } catch {
-      // No worktree in either blob, which is the normal case for an action
-      // invoked from a workspace. The cwd below answers it instead.
-    }
-  }
-
-  const worktreePath = worktreeRoot(explicit ?? contextCwd(env));
-
-  return {
-    worktreePath,
-    repoRoot: mainWorktree(worktreePath),
-    branch: currentBranch(worktreePath),
-  };
 }
 
 const preview = (verb, path, detail) =>
@@ -94,13 +67,20 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env) {
 
 export function run(env = process.env, argv = []) {
   const dry = argv.includes("--dry-run");
-  const { worktreePath, repoRoot, branch } = dry
-    ? resolveDryRunTarget(env, argv)
+  const { worktreePath, repoRoot, branch, branchSource, event } = dry
+    ? resolveTarget(env, argv)
     : readContext(env);
   const config = loadConfig(repoRoot);
 
   console.log(`worktree ${worktreePath}`);
   console.log(`repository ${repoRoot}${branch ? ` (${branch})` : ""}`);
+
+  // An event that names no branch is how a payload the plugin has stopped
+  // understanding looks from in here: git covers for it silently while the
+  // checkout exists, and `worktree.removed` then fails with nothing to go on.
+  if (event && branchSource === "checkout") {
+    console.log("note: the event named no branch, so it was read from the checkout instead");
+  }
   console.log(config.configured ? `config ${CONFIG_FILENAME}` : "config defaults");
 
   const vars = worktreeVariables({ worktreePath, repoRoot, branch });
@@ -124,7 +104,8 @@ export function run(env = process.env, argv = []) {
   }
 
   results.push(
-    ...runPostCreate(worktreePath, config.post_create, {
+    ...runCommands(worktreePath, config.post_create, {
+      action: "post_create",
       timeoutMs: config.post_create_timeout_ms,
       configDir: env.HERDR_PLUGIN_CONFIG_DIR,
       repoRoot,

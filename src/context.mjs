@@ -1,9 +1,10 @@
-import { mainWorktree } from "./git.mjs";
+import { existsSync } from "node:fs";
+import { currentBranch, mainWorktree, worktreeRoot } from "./git.mjs";
 
 // Herdr hands the hook two JSON blobs. The invocation context carries a
-// WorkspaceWorktreeInfo (checkout_path, repo_root); the event payload carries a
-// WorktreeInfo (path) plus the workspace it belongs to. Either is enough, so we
-// read whichever arrived rather than depending on one shape.
+// WorkspaceWorktreeInfo (checkout_path, repo_root); the event payload wraps a
+// WorktreeInfo (path, branch) and its workspace in `{ event, data }`. Either is
+// enough, so we read whichever arrived rather than depending on one shape.
 function parseJson(raw) {
   if (!raw) return null;
   try {
@@ -29,13 +30,41 @@ export function contextCwd(env = process.env) {
 }
 
 /**
+ * The branch, and where it came from. Only the event payload names one — the
+ * invocation context describes the workspace and carries no branch at all — so
+ * git answers for the invocations that arrive without an event, such as
+ * `--dry-run`. That answer needs the checkout, and `worktree.removed` fires
+ * once the directory is gone, which is exactly when the payload has to be
+ * believed.
+ *
+ * `source` is reported because this is the one resolution that can succeed for
+ * the wrong reason: a hook that stopped reading the payload correctly would
+ * still be handed the right branch by git, and say nothing, for as long as the
+ * checkout exists. Every caller of this resolves a branch the same way, so the
+ * preview and the hook cannot drift apart again.
+ */
+function readBranch(event, worktreePath) {
+  const named = event?.worktree?.branch;
+  if (named) return { branch: named, source: "event" };
+
+  const fromCheckout = existsSync(worktreePath) ? currentBranch(worktreePath) : null;
+  return fromCheckout
+    ? { branch: fromCheckout, source: "checkout" }
+    : { branch: null, source: null };
+}
+
+/**
  * Resolve the new checkout and the repository it came from, from the plugin
  * environment. Throws when neither blob names a worktree, which is the only
  * case the hook cannot recover from.
  */
 export function readContext(env = process.env) {
   const context = pluginContext(env);
-  const event = parseJson(env.HERDR_PLUGIN_EVENT_JSON);
+  // 0.9.1 wraps the payload in `{ event, data }`. The envelope is undocumented
+  // in 0.7.0, which the manifest still supports, so an unwrapped blob is read
+  // rather than assumed away.
+  const payload = parseJson(env.HERDR_PLUGIN_EVENT_JSON);
+  const event = payload?.data ?? payload;
 
   const worktreePath =
     context?.worktree?.checkout_path ?? event?.worktree?.path ?? event?.worktree?.checkout_path;
@@ -43,7 +72,7 @@ export function readContext(env = process.env) {
   if (!worktreePath) {
     throw new Error(
       "no worktree in HERDR_PLUGIN_CONTEXT_JSON or HERDR_PLUGIN_EVENT_JSON; " +
-        "is this running as a worktree.created hook?",
+        "is this running as a worktree.created or worktree.removed hook?",
     );
   }
 
@@ -52,9 +81,40 @@ export function readContext(env = process.env) {
     event?.workspace?.worktree?.repo_root ??
     mainWorktree(worktreePath);
 
+  const { branch, source } = readBranch(event, worktreePath);
+
+  return { worktreePath, repoRoot, branch, branchSource: source, event: event !== null };
+}
+
+/**
+ * The target of an invocation that carries no event of its own: an explicit
+ * path argument, then the worktree or workspace Herdr says is in focus, then
+ * the current directory. `--dry-run` resolves what it previews this way.
+ *
+ * It ends in the same `readBranch` as the hook deliberately. Preview and hook
+ * used to name the branch by two separate routes, which is how a hook that
+ * could not read a branch at all kept printing the right one in its preview.
+ */
+export function resolveTarget(env = process.env, argv = []) {
+  const explicit = argv.find((argument) => !argument.startsWith("-"));
+
+  if (!explicit) {
+    try {
+      return readContext(env);
+    } catch {
+      // No worktree in either blob, which is the normal case for an action
+      // invoked from a workspace. The cwd below answers it instead.
+    }
+  }
+
+  const worktreePath = worktreeRoot(explicit ?? contextCwd(env));
+  const { branch, source } = readBranch(null, worktreePath);
+
   return {
     worktreePath,
-    repoRoot,
-    branch: context?.worktree?.branch ?? event?.worktree?.branch ?? null,
+    repoRoot: mainWorktree(worktreePath),
+    branch,
+    branchSource: source,
+    event: false,
   };
 }
