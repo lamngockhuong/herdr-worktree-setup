@@ -299,6 +299,21 @@ pnpm lint
 herdr plugin link .
 ```
 
+The suite covers everything the plugin does on its own, but it never talks to a
+Herdr server. What it cannot reach is the event delivery itself: whether the
+payload a released Herdr sends still has the shape `src/context.mjs` reads. That
+is worth a manual pass after a Herdr upgrade, against a repository you can throw
+away:
+
+```bash
+herdr worktree create --cwd /path/to/throwaway-repo --branch feature/live-test
+herdr plugin log list --plugin lamngockhuong.worktree-setup --limit 1
+herdr worktree remove --workspace <id>   # the id the create printed, for post_remove
+```
+
+The log entry carries the whole report. Trust the repository first if the run is
+meant to reach `post_create`, and remove the line afterwards.
+
 ## License
 
 MIT © Lam Ngoc Khuong

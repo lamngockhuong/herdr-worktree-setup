@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, lstatSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { runCommands } from "../src/commands.mjs";
+import { runCommands, TRUST_FILENAME } from "../src/commands.mjs";
 import { run } from "../src/index.mjs";
 import { worktreeVariables } from "../src/template.mjs";
 import {
@@ -132,13 +132,47 @@ test("refuses to run repository commands until the machine owner trusts the repo
   assert.equal(read(allowed, "ran.txt"), "yes");
 });
 
-test("reports a failing setup command as a failed run", () => {
-  const repo = makeRepo({ "fail.cjs": "process.exit(3);" });
-  write(repo, ".herdr-worktree.toml", 'post_create = ["node fail.cjs"]\nnotify = false');
+test("reports a failing setup command and stops the ones after it", () => {
+  const repo = makeRepo({ "fail.cjs": "process.exit(3);", "write-arg.cjs": writeArgScript() });
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    ['post_create = ["node fail.cjs", "node write-arg.cjs late"]', "notify = false"].join("\n"),
+  );
   const worktree = addWorktree(repo, "failing");
 
   const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir(repo) });
   assert.equal(run(env), 1);
+
+  // A broken install must not cascade into the confusing follow-up errors of
+  // every later command running against a half-prepared worktree.
+  assert.equal(existsSync(join(worktree, "arg.txt")), false);
+});
+
+test("kills a command that never returns, and says that is what happened", () => {
+  // The shell does the waiting itself. A command that spawns a child to wait
+  // for it would leave that child behind when the shell is killed — which is
+  // what the timeout detail warns about, and on Windows it then holds the
+  // fixture directory open until the suite fails trying to delete it.
+  const hang = process.platform === "win32" ? "Start-Sleep -Seconds 30" : "sleep 30";
+  const repo = makeRepo({ "write-arg.cjs": writeArgScript() });
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    [
+      "post_create_timeout_ms = 1500",
+      `post_create = ["${hang}", "node write-arg.cjs late"]`,
+      "notify = false",
+    ].join("\n"),
+  );
+  const worktree = addWorktree(repo, "hanging");
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir(repo) });
+
+  const result = runEntry("src/index.mjs", [], env);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /timed out after 1500ms/);
+  assert.equal(existsSync(join(worktree, "arg.txt")), false);
 });
 
 test("fails loudly when Herdr passes no worktree at all", () => {
@@ -243,6 +277,24 @@ test("--dry-run resolves the worktree from a path argument", () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /would copy \.env/);
   assert.equal(existsSync(join(worktree, ".env")), false);
+});
+
+test("the dry run names the trust file in full, as a real run does", () => {
+  const repo = repoRunningCommand("post_create", "node write-arg.cjs one");
+  const worktree = addWorktree(repo, "dry-untrusted");
+  const cfg = configDir();
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: cfg }, "dry-untrusted");
+
+  const preview = runEntry("src/index.mjs", ["--dry-run"], env);
+  const real = runEntry("src/index.mjs", [], env);
+
+  // Someone told a repository is untrusted has to edit this file, so the
+  // preview must not send them looking for it by filename alone. A Windows
+  // path is full of backslashes, so these are substrings rather than patterns.
+  const path = join(cfg, TRUST_FILENAME);
+  assert.ok(preview.stdout.includes(`would be skipped`), preview.stdout);
+  assert.ok(preview.stdout.includes(`is not listed in ${path}`), preview.stdout);
+  assert.ok(real.stdout.includes(`add this line to ${path}: ${repo}`), real.stdout);
 });
 
 test("a quoted argument in the command survives the shell", () => {

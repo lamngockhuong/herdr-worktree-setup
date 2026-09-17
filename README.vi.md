@@ -299,6 +299,21 @@ pnpm lint
 herdr plugin link .
 ```
 
+Bộ test phủ mọi thứ plugin tự làm được, nhưng nó không nói chuyện với Herdr
+server. Thứ nó không với tới là chính việc chuyển sự kiện: payload mà một bản
+Herdr phát hành gửi sang có còn đúng hình dạng `src/context.mjs` đọc hay không.
+Điều đó đáng chạy tay một lượt sau mỗi lần nâng cấp Herdr, trên một repository
+bỏ đi được:
+
+```bash
+herdr worktree create --cwd /path/to/throwaway-repo --branch feature/live-test
+herdr plugin log list --plugin lamngockhuong.worktree-setup --limit 1
+herdr worktree remove --workspace <id>   # id mà lệnh create in ra, để chạy post_remove
+```
+
+Bản ghi log mang theo toàn bộ báo cáo. Hãy thêm repository vào danh sách tin cậy
+trước nếu muốn lần chạy chạm tới `post_create`, và xoá dòng đó sau khi xong.
+
 ## Giấy phép
 
 MIT © Lam Ngoc Khuong
