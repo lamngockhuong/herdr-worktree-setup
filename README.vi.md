@@ -6,7 +6,7 @@ Plugin cho [Herdr](https://herdr.dev) chuẩn bị sẵn mọi worktree mà Herd
 
 `git worktree add` cho bạn một bản checkout sạch của những file git đang theo dõi — và không gì khác. File `.env` bạn ngồi cả buổi chiều điền vẫn nằm lại ở checkout chính, nên việc đầu tiên một worktree mới làm được là khởi động thất bại. Plugin này lấp khoảng trống đó ở sự kiện `worktree.created`.
 
-Không cần cấu hình gì vẫn chạy: plugin tìm những file cấu hình mà git đang bỏ qua rồi chép sang. Repository nào cần nhiều hơn thì khai báo trong `.herdr-worktree.toml`.
+Không cần cấu hình gì vẫn chạy: plugin tìm những file cấu hình mà git đang bỏ qua rồi chép sang. Repository nào cần nhiều hơn thì khai báo trong `.herdr-worktree.toml`, kể cả việc chạy gì khi worktree được tạo và dọn gì khi nó bị xóa.
 
 Chạy trên Linux, macOS và Windows. Ngoài Node và git thì không phụ thuộc gì thêm.
 
@@ -87,8 +87,12 @@ exclude = ["**/.env.ci"]
 seed_from_example = false
 
 # Các lệnh chạy trong worktree mới. Cần được tin cậy — xem bên dưới.
-post_create = ["pnpm install", "pnpm dev --port {{ branch | hash_port }}"]
+post_create = ["pnpm install"]
 post_create_timeout_ms = 600000
+
+# Các lệnh chạy sau khi worktree bị xóa, chạy trong repository.
+post_remove = ["docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v"]
+post_remove_timeout_ms = 600000
 
 # Hiện thông báo Herdr khi chạy xong.
 notify = true
@@ -104,11 +108,15 @@ notify = true
 | `seed_from_example` | boolean | `false` |
 | `post_create` | danh sách chuỗi | `[]` |
 | `post_create_timeout_ms` | số nguyên | `600000` |
+| `post_remove` | danh sách chuỗi | `[]` |
+| `post_remove_timeout_ms` | số nguyên | `600000` |
 | `notify` | boolean | `true` |
 
 Gõ sai tên key là lỗi chứ không phải chuyện cho qua: plugin nêu đúng tên sai và liệt kê các key hợp lệ. Mục trong `copy` và `symlink` phải nằm bên trong repository — đường dẫn tuyệt đối và `..` đều bị từ chối.
 
 File được đọc bằng một lát cắt rất nhỏ của TOML, hẹp như vậy là có chủ ý: dòng chú thích, `key = value`, và một cấp tiêu đề `[section]`, trong đó giá trị là boolean, số nguyên, chuỗi, hoặc danh sách những kiểu đó. Cú pháp khác sẽ báo lỗi rõ ràng thay vì âm thầm hiểu sai.
+
+Còn chuyện một repository cụ thể thật ra cần key nào — monorepo, ứng dụng Rails, một workspace Terraform — thì xem [docs/recipes.vi.md](docs/recipes.vi.md).
 
 ### `seed_from_example`
 
@@ -116,18 +124,20 @@ Mặc định tắt, và đây là một lựa chọn đáng giải thích. Mộ
 
 ## Lệnh cài đặt và quyền tin cậy
 
-`post_create` chạy những lệnh do *repository* chọn. Chỉ clone dự án của người khác rồi mở một worktree thì không bao giờ được phép đủ để các lệnh đó chạy, nên chủ máy phải tự cho phép từng repository, từ bên ngoài repository:
+`post_create` và `post_remove` chạy những lệnh do *repository* chọn. Chỉ clone dự án của người khác rồi mở một worktree thì không bao giờ được phép đủ để các lệnh đó chạy, nên chủ máy phải tự cho phép từng repository, từ bên ngoài repository:
 
 ```bash
 herdr plugin config-dir lamngockhuong.worktree-setup
 # thêm đường dẫn tuyệt đối của repository vào trusted-repos.txt trong thư mục đó
 ```
 
-Mỗi dòng một đường dẫn tuyệt đối; dấu `#` mở đầu phần chú thích. Chừng nào repository chưa có trong danh sách đó, khối `post_create` của nó bị bỏ qua và log in ra đúng dòng cần thêm.
+Mỗi dòng một đường dẫn tuyệt đối; dấu `#` mở đầu phần chú thích. Chừng nào repository chưa có trong danh sách đó, cả hai khối lệnh của nó đều bị bỏ qua và log in ra đúng dòng cần thêm. Một danh sách dùng chung cho cả hai: repository đã được tin cậy để dựng worktree lên thì cũng được tin cậy để dọn nó đi.
 
 `HERDR_WORKTREE_SETUP_TRUST_ALL=1` tắt hẳn lớp chặn này. Chỉ đặt biến đó nếu mọi repository bạn mở đều do chính bạn viết.
 
-Các lệnh chạy trong worktree mới và dừng ngay ở lệnh đầu tiên thất bại. Shell đứng sau chúng là `/bin/sh` trên Linux và macOS, còn trên Windows là **PowerShell** — `powershell.exe -NoProfile -NonInteractive`, không phải `cmd.exe`. Profile PowerShell của bạn cố tình không được nạp, nhờ vậy hook luôn thấy cùng một môi trường bất kể ai chạy nó.
+Mỗi lệnh phải chạy xong thì lệnh kế tiếp mới bắt đầu, và cả chuỗi dừng ngay ở lệnh đầu tiên thất bại. Không có gì được đưa xuống chạy nền giúp bạn, nên một lệnh không bao giờ kết thúc — chẳng hạn dev server chạy ở tiền cảnh — sẽ giữ hook lại cho đến khi hết `post_create_timeout_ms`, rồi bị giết và bị tính là thất bại. Hãy tự khởi động những tiến trình chạy dài, hoặc giao chúng cho thứ có trả về, ví dụ `docker compose up -d`.
+
+Shell đứng sau các lệnh là `/bin/sh` trên Linux và macOS, còn trên Windows là **PowerShell** — `powershell.exe -NoProfile -NonInteractive`, không phải `cmd.exe`. Profile PowerShell của bạn cố tình không được nạp, nhờ vậy hook luôn thấy cùng một môi trường bất kể ai chạy nó.
 
 Ai đang dùng Windows và nâng cấp từ 0.1.0 nên đọc lại khối `post_create` của mình, vì shell bên dưới đã đổi:
 
@@ -137,13 +147,16 @@ Ai đang dùng Windows và nâng cấp từ 0.1.0 nên đọc lại khối `post
 
 ## Biến trong lệnh
 
-Mỗi mục trong `post_create` đều có thể mang những chỗ điền dạng `{{ biến }}`. Đây chính là thứ cho phép hai worktree của cùng một repository chạy song song thay vì giành nhau một cổng hay một tên container:
+Mỗi mục trong `post_create` đều có thể mang những chỗ điền dạng `{{ biến }}`. Đây chính là thứ cho phép hai worktree của cùng một repository chạy song song thay vì giành nhau một cổng hay một tên container.
+
+Không có chúng, `post_create = ["docker compose up -d"]` vẫn chạy tốt cho đến ngày bạn mở worktree thứ hai. Compose đặt tên project theo thư mục nó chạy trong đó, mà hai worktree lại cùng mang tên một repository, nên cái thứ hai lặng lẽ nhận luôn container của cái thứ nhất thay vì dựng bộ riêng. Đặt tên project là `{{ repo_name }}-{{ branch | sanitize }}` thì mỗi nhánh có một stack của riêng mình, kèm database riêng.
+
+Cổng cũng đụng nhau theo đúng kiểu đó và được xử lý theo đúng cách đó. `{{ branch | hash_port }}` giao cho `feature/checkout` số 13706 ở mọi lần chạy và cho `fix/login` số 18690 ở mọi lần chạy, nên hai nhánh không bao giờ cùng xin một cổng — dù bạn truyền số đó cho một container hay tự gõ nó cho dev server mà bạn tự khởi động:
 
 ```toml
 post_create = [
   "pnpm install",
   "docker compose -p {{ repo_name }}-{{ branch | sanitize }} up -d",
-  "pnpm dev --port {{ branch | hash_port }}",
 ]
 ```
 
@@ -165,13 +178,35 @@ Mỗi chỗ điền nhận tối đa một bộ lọc, viết sau dấu `|`:
 
 `hash` và `hash_port` chỉ phụ thuộc vào tên nhánh, nên một nhánh luôn nhận đúng cổng đó ở mọi lần chạy, còn hai nhánh khác nhau thì nhận hai cổng khác nhau. Cách tính hai giá trị này không được đổi tùy tiện: đổi thì cổng của mọi worktree đang có cũng dịch theo, nên đó là thay đổi phá vỡ tương thích chứ không phải một bản sửa lỗi.
 
-Ba điều đáng nhớ:
+Năm điều đáng nhớ:
 
 - **Giá trị thay vào luôn được bọc nháy cho shell.** `--port {{ branch | hash_port }}` đến tay shell dưới dạng `--port '13706'`. Lệnh chỉ đọc argv thì không thấy khác gì, nhưng lệnh nào tự cắt chuỗi nhận được sẽ thấy cả dấu nháy. Chính lớp bọc này khiến một nhánh tên `a;rm -rf ~` không còn là một câu lệnh: git chấp nhận cái tên đó, và plugin đưa nó sang lệnh như một tham số nguyên vẹn trên mọi nền tảng. Phần chữ còn lại của câu lệnh là của bạn và được giữ nguyên.
 - **Không chỗ nào hiện ra rỗng.** Một tên biến lạ, một bộ lọc viết sai, hay một `{{` thiếu `}}` đều làm lệnh đó thất bại kèm lời giải thích. `{{ branch }}` trong một worktree đang ở detached HEAD cũng vậy, vì ở đó không có nhánh nào: một câu lệnh dựng quanh cái cổng đã biến mất còn tệ hơn một câu lệnh từ chối chạy.
 - **Đừng tự bọc nháy quanh một chỗ điền.** `--name "{{ branch | sanitize }}"` đưa cho lệnh chuỗi `"'feature-a'"`, kèm luôn dấu nháy. Plugin đã bọc nháy sẵn rồi.
 - **Dấu ngoặc của công cụ khác được giữ nguyên.** Plugin chỉ nhận những biểu thức trông giống một tên biến, chẳng hạn `{{ branch }}` hay `{{ branch | hash_port }}`. `docker ps --format '{{.Names}}'` cùng các mẫu Go hay Helm đi qua đúng như đã viết.
 - **Chỉ các lệnh mới nhận biến.** `copy`, `symlink`, `patterns` và `exclude` giữ nguyên chữ, nhờ vậy một đường dẫn sai bị bắt ngay lúc đọc cấu hình chứ không phải giữa chừng.
+
+Các ví dụ hoàn chỉnh — mỗi nhánh một stack Compose, hai dev server cùng lúc, và cái giá của từng lựa chọn — nằm ở [docs/recipes.vi.md](docs/recipes.vi.md).
+
+## Dọn dẹp khi worktree bị xóa
+
+Xóa một worktree là xóa file. Những gì `post_create` đã tạo ra bên ngoài checkout — một project Compose, một container, một volume — vẫn sống tiếp, và sau một tuần mở worktree thì máy đầy những database không ai dùng. `post_remove` chạy ở sự kiện `worktree.removed` của Herdr, và đây là chỗ để một repository tự dọn sau lưng mình:
+
+```toml
+post_create = ["docker compose -p {{ repo_name }}-{{ branch | sanitize }} up -d"]
+post_remove = ["docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v"]
+```
+
+Hai dòng đó gọi đúng cùng một stack vì chúng được dựng từ cùng một bộ biến, và đó chính là lý do những cái tên này được suy ra chứ không phải tự đặt.
+
+Có bốn điểm khác `post_create` đáng nhớ:
+
+- **Lệnh chạy trong repository, không phải trong worktree.** Lúc sự kiện bắn ra thì checkout đã bị xóa, nên không còn thư mục nào để chạy trong đó và cũng chẳng còn gì ở đó để đọc. Thứ gì mà lệnh dọn cần tìm thì nó tìm theo tên.
+- **`{{ branch }}` vẫn dùng được.** Giá trị đó đến từ sự kiện Herdr gửi sang, chứ không phải từ một lệnh git chạy trong thư mục đã biến mất. `{{ worktree_path }}` và `{{ worktree_name }}` vẫn gọi đúng tên thư mục đó, hữu ích khi một tài nguyên được đặt tên theo nó, và vô dụng nếu bạn định đọc một file bên trong.
+- **Chỉ thất bại mới hiện thông báo.** Bạn vừa xóa worktree và đã chuyển sang việc khác; một thông báo báo dọn xong sẽ làm phiền mà chẳng để làm gì, còn một thông báo báo dọn hỏng lại đúng là cách bạn biết vẫn còn container đang chạy. Dù thế nào thì log cũng giữ đủ báo cáo.
+- **Vẫn đúng một lớp tin cậy đó.** Repository có tên trong `trusted-repos.txt` thì được cả hai khối; không có tên thì không được khối nào.
+
+`post_remove_timeout_ms` khống chế cả khối y như `post_create_timeout_ms`, và mặc định cũng là mười phút.
 
 ## Xem trước những gì sẽ xảy ra
 
@@ -188,7 +223,7 @@ config .herdr-worktree.toml
 dry run: nothing is linked, copied, seeded or executed
 would link shared
 would copy apps/api/.env.local
-would run  pnpm dev --port '13706'
+would run  docker compose -p 'demo'-'feature-checkout' up -d
 
 press any key to close
 ```
