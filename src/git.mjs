@@ -64,8 +64,18 @@ export function isIgnored(repoRoot, relativePath) {
   return result.status === 0;
 }
 
+/** Absolute path of the checkout holding `cwd`, linked worktree or main one. */
+export function worktreeRoot(cwd) {
+  // git prints forward slashes even on Windows; give callers the native form.
+  return resolve(git(cwd, ["rev-parse", "--show-toplevel"]));
+}
+
+/** The branch checked out in `cwd`, or null when its HEAD is detached. */
+export function currentBranch(cwd) {
+  return git(cwd, ["branch", "--show-current"]) || null;
+}
+
 /** Repository root for any path inside a checkout, resolved to the main one. */
 export function repoRootFrom(cwd) {
-  const toplevel = git(cwd, ["rev-parse", "--show-toplevel"]);
-  return mainWorktree(toplevel);
+  return mainWorktree(worktreeRoot(cwd));
 }

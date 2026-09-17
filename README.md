@@ -87,7 +87,7 @@ exclude = ["**/.env.ci"]
 seed_from_example = false
 
 # Commands to run in the new worktree. Requires trust — see below.
-post_create = ["pnpm install"]
+post_create = ["pnpm install", "pnpm dev --port {{ branch | hash_port }}"]
 post_create_timeout_ms = 600000
 
 # Show a Herdr toast when the run finishes.
@@ -127,7 +127,70 @@ One absolute path per line; `#` starts a comment. Until a repository appears the
 
 `HERDR_WORKTREE_SETUP_TRUST_ALL=1` disables the gate entirely. Set it only if every repository you open is one you wrote.
 
-Commands run through the platform shell in the new worktree, stopping at the first failure.
+Commands run in the new worktree, stopping at the first failure. The shell is `/bin/sh` on Linux and macOS, and **PowerShell** on Windows — `powershell.exe -NoProfile -NonInteractive`, not `cmd.exe`. Your PowerShell profile is deliberately not loaded, so a hook sees the same environment whoever runs it.
+
+Windows users upgrading from 0.1.0 should re-read their `post_create` block, because the shell changed under it:
+
+- `&&` and `||` are syntax errors in Windows PowerShell 5.1. Split `"pnpm i && pnpm build"` into two entries — they already stop at the first failure.
+- `cmd` built-ins such as `set`, `copy` and `del` are gone. PowerShell has its own.
+- A failed command is reported as `exit code 1` whatever it actually exited with. PowerShell only forwards its own exit status unless the command string ends in `exit $LASTEXITCODE`, and appending that would report a *success* wrongly when the last thing to run was a cmdlet. The failure is detected either way; only the number is lost.
+
+## Template variables
+
+Every `post_create` entry may carry `{{ variable }}` placeholders, which is what lets two worktrees of the same repository run side by side instead of fighting over one port or one container name:
+
+```toml
+post_create = [
+  "pnpm install",
+  "docker compose -p {{ repo_name }}-{{ branch | sanitize }} up -d",
+  "pnpm dev --port {{ branch | hash_port }}",
+]
+```
+
+| Variable | Value |
+| --- | --- |
+| `branch` | the branch checked out in the new worktree |
+| `worktree_path` | the new checkout's absolute path |
+| `worktree_name` | its last path segment |
+| `repo_path` | the main checkout's absolute path |
+| `repo_name` | its last path segment |
+
+One optional filter per placeholder, written after a `|`:
+
+| Filter | Does | `feature/checkout` becomes |
+| --- | --- | --- |
+| `sanitize` | replaces `/` and `\` with `-` | `feature-checkout` |
+| `hash` | three base36 characters of a digest | `l22` |
+| `hash_port` | a port in 10000–19999 | `13706` |
+
+`hash` and `hash_port` are pure functions of the branch name, so a branch claims the same port on every run, and two branches claim different ones. Those numbers are a compatibility surface: changing how they are computed would move every existing worktree's port, so it is treated as a breaking change rather than a fix.
+
+Three rules worth knowing:
+
+- **Substituted values are shell-quoted.** `--port {{ branch | hash_port }}` reaches the shell as `--port '13706'`. Harmless for anything reading argv, but a command doing its own string surgery on what it receives will see the quotes. The quoting is what stops a branch named `a;rm -rf ~` from being an instruction: git accepts that name, and the plugin runs it as one literal argument on every platform. The surrounding command text is yours and is left exactly as written.
+- **Nothing renders as empty.** An unknown variable name, a misspelled filter, and a `{{` with no `}}` each fail the command and name the problem. So does `{{ branch }}` in a detached worktree, which has no branch: a command built from a silently missing port is worse than one that refuses to run.
+- **Do not put your own quotes around a placeholder.** `--name "{{ branch | sanitize }}"` gives the command `"'feature-a'"`, quotes and all. The plugin has already quoted it.
+- **Another tool's braces are left alone.** Only an expression shaped like a variable name, such as `{{ branch }}` or `{{ branch | hash_port }}`, is claimed. `docker ps --format '{{.Names}}'` and a Go or Helm template pass through exactly as written.
+- **Only commands are templated.** `copy`, `symlink`, `patterns` and `exclude` stay literal, so a bad path is caught when the config is read rather than mid-run.
+
+## Seeing what would happen
+
+```bash
+herdr plugin action invoke lamngockhuong.worktree-setup.dry-run
+```
+
+It prints the run without performing it — nothing is linked, copied, seeded or executed:
+
+```
+dry run: nothing is linked, copied, seeded or executed
+would link shared
+would copy apps/api/.env.local
+would run  pnpm dev --port '13706'
+```
+
+Commands appear rendered and quoted exactly as they would reach the shell, which is the fastest way to see what a template resolves to. The copy, link and seed lines are the targets as they were resolved, not a promise that each one would succeed. A template that cannot be rendered is reported and exits non-zero.
+
+Outside Herdr, `node src/index.mjs --dry-run /path/to/worktree` does the same; with no path it uses the workspace Herdr has in focus, or the current directory.
 
 ## Copy or link?
 

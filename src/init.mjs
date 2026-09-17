@@ -5,6 +5,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CONFIG_FILENAME, DEFAULTS } from "./config.mjs";
+import { pluginContext } from "./context.mjs";
 import { detectFiles } from "./detect.mjs";
 import { repoRootFrom } from "./git.mjs";
 
@@ -22,13 +23,7 @@ export function resolveRepoRoot(env = process.env, argv = []) {
   const explicit = argv[0];
   if (explicit) return repoRootFrom(explicit);
 
-  let context = null;
-  try {
-    context = JSON.parse(env.HERDR_PLUGIN_CONTEXT_JSON ?? "null");
-  } catch {
-    context = null;
-  }
-
+  const context = pluginContext(env);
   if (context?.worktree?.repo_root) return context.worktree.repo_root;
 
   const cwd = context?.workspace_cwd ?? context?.focused_pane_cwd ?? process.cwd();
@@ -71,8 +66,12 @@ ${found}
 # seed_from_example = false
 
 # Commands to run in the new worktree. The machine owner must trust this
-# repository first: see the plugin README.
-# post_create = ["pnpm install"]
+# repository first: see the plugin README. An entry may carry {{ variable }}
+# placeholders — branch, worktree_path, worktree_name, repo_path, repo_name —
+# each optionally through one filter: sanitize, hash, or hash_port. Every
+# substituted value is shell-quoted, so no branch name can run commands of its
+# own, and a branch keeps the same port on every run.
+# post_create = ["pnpm install", "docker compose -p {{ branch | sanitize }} up -d"]
 # post_create_timeout_ms = ${DEFAULTS.post_create_timeout_ms}
 
 # Show a Herdr toast when the run finishes.

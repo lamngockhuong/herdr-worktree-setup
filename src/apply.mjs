@@ -103,12 +103,12 @@ export function exampleTarget(relative) {
 }
 
 /**
- * Fill gaps from committed placeholders: every tracked `*.example` whose real
- * counterpart is still missing gets a starting copy. Off by default, because a
- * file full of placeholder values can be worse than an obvious absence.
+ * Every committed placeholder whose real counterpart is still missing, as
+ * `{ source, target }` pairs. Split out from the copying so `--dry-run` can
+ * name the same files without creating any of them.
  */
-export function seedFromExamples(worktreePath, patterns) {
-  const results = [];
+export function exampleSeeds(worktreePath, patterns) {
+  const seeds = [];
   for (const tracked of trackedFiles(worktreePath)) {
     if (!isExample(tracked)) continue;
 
@@ -116,13 +116,22 @@ export function seedFromExamples(worktreePath, patterns) {
     if (!target || !matchesAny(target, patterns)) continue;
     if (pathExists(join(worktreePath, target))) continue;
 
-    results.push(
-      attempt("seed", target, () => {
-        ensureParent(join(worktreePath, target));
-        cpSync(join(worktreePath, tracked), join(worktreePath, target));
-        return result("seed", target, "done", `from ${tracked}`);
-      }),
-    );
+    seeds.push({ source: tracked, target });
   }
-  return results;
+  return seeds;
+}
+
+/**
+ * Fill gaps from committed placeholders: every tracked `*.example` whose real
+ * counterpart is still missing gets a starting copy. Off by default, because a
+ * file full of placeholder values can be worse than an obvious absence.
+ */
+export function seedFromExamples(worktreePath, patterns) {
+  return exampleSeeds(worktreePath, patterns).map(({ source, target }) =>
+    attempt("seed", target, () => {
+      ensureParent(join(worktreePath, target));
+      cpSync(join(worktreePath, source), join(worktreePath, target));
+      return result("seed", target, "done", `from ${source}`);
+    }),
+  );
 }

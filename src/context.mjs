@@ -13,13 +13,18 @@ function parseJson(raw) {
   }
 }
 
+/** Herdr's invocation-context blob, or null when it is absent or malformed. */
+export function pluginContext(env = process.env) {
+  return parseJson(env.HERDR_PLUGIN_CONTEXT_JSON);
+}
+
 /**
  * Resolve the new checkout and the repository it came from, from the plugin
  * environment. Throws when neither blob names a worktree, which is the only
  * case the hook cannot recover from.
  */
 export function readContext(env = process.env) {
-  const context = parseJson(env.HERDR_PLUGIN_CONTEXT_JSON);
+  const context = pluginContext(env);
   const event = parseJson(env.HERDR_PLUGIN_EVENT_JSON);
 
   const worktreePath =
