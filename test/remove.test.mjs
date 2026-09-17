@@ -79,7 +79,11 @@ test("does nothing at all for a repository that configured no teardown", () => {
 });
 
 test("reports a failing teardown rather than swallowing it", () => {
-  const repo = repoTearingDown("node -e process.exit(3)");
+  // A script rather than `node -e`: PowerShell claims the parentheses in an
+  // inline expression, and the command then succeeds on Windows alone.
+  const repo = repoRunningCommand("post_remove", "node fail.cjs", {
+    "fail.cjs": "process.exit(3);",
+  });
   const worktree = goneWorktree(repo, "broken");
   const env = removedEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir(repo) }, "broken");
 
