@@ -4,9 +4,10 @@ import { resolve } from "node:path";
 /**
  * Run git in `cwd` and return trimmed stdout. Throws with git's own stderr when
  * the command fails, so callers surface the real reason instead of an empty
- * string.
+ * string. `allowFailure` turns a non-zero exit into null instead, for the
+ * queries where the exit code is the answer.
  */
-export function git(cwd, args) {
+export function git(cwd, args, { allowFailure = false } = {}) {
   const result = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
@@ -15,6 +16,7 @@ export function git(cwd, args) {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
+    if (allowFailure) return null;
     const detail = (result.stderr || "").trim() || `exit code ${result.status}`;
     throw new Error(`git ${args.join(" ")} failed: ${detail}`);
   }
@@ -56,12 +58,8 @@ export function trackedFiles(repoRoot) {
 
 /** Whether git ignores `relativePath`, used to vet paths found on disk. */
 export function isIgnored(repoRoot, relativePath) {
-  const result = spawnSync("git", ["check-ignore", "-q", "--", relativePath], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  return result.status === 0;
+  const args = ["check-ignore", "-q", "--", relativePath];
+  return git(repoRoot, args, { allowFailure: true }) !== null;
 }
 
 /** Absolute path of the checkout holding `cwd`, linked worktree or main one. */
@@ -77,5 +75,7 @@ export function currentBranch(cwd) {
 
 /** Repository root for any path inside a checkout, resolved to the main one. */
 export function repoRootFrom(cwd) {
-  return mainWorktree(worktreeRoot(cwd));
+  // `worktree list` reports the main worktree first from anywhere in the
+  // repository, so there is nothing for a `rev-parse` to establish first.
+  return mainWorktree(cwd);
 }

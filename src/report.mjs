@@ -1,11 +1,21 @@
 import { spawnSync } from "node:child_process";
 
-const VERBS = {
-  copy: "copied",
-  symlink: "linked",
-  seed: "seeded",
-  post_create: "ran",
+// The verb and the noun for each action, together: adding an action must not
+// mean remembering a second table twenty lines further down.
+const LABELS = {
+  copy: ["copied", "file"],
+  symlink: ["linked", "file"],
+  seed: ["seeded", "file"],
+  post_create: ["ran", "command"],
 };
+
+/**
+ * One line of the report. Both `apply.mjs` and `post-create.mjs` produce these,
+ * and everything below reads them, so the shape is defined here. A record with
+ * nothing to add carries no `detail` key at all rather than an empty one.
+ */
+export const result = (action, path, status, detail) =>
+  detail === undefined ? { action, path, status } : { action, path, status, detail };
 
 /** Counts of what actually happened, keyed by action, ignoring skips. */
 export function summarize(results) {
@@ -22,8 +32,7 @@ export function summarize(results) {
 /** One-line human summary, e.g. "copied 4 files, ran 1 command". */
 export function summaryLine({ done, failed }) {
   const parts = Object.entries(done).map(([action, count]) => {
-    const verb = VERBS[action] ?? action;
-    const unit = action === "post_create" ? "command" : "file";
+    const [verb, unit] = LABELS[action] ?? [action, "file"];
     return `${verb} ${count} ${count === 1 ? unit : `${unit}s`}`;
   });
   if (failed > 0) parts.push(`${failed} failed`);
@@ -42,6 +51,8 @@ export function printReport(results) {
  * Show a Herdr toast. Best effort on purpose: spawnSync reports a missing server
  * or CLI in its return value, which we ignore, so nothing here can turn a
  * successful setup into a failed hook. The log already carries the full report.
+ * It waits rather than detaching, because the timeout is what guarantees a
+ * wedged notification CLI is not left behind as an orphan.
  */
 export function notify(title, body, env = process.env) {
   const bin = env.HERDR_BIN_PATH || "herdr";

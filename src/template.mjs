@@ -32,11 +32,6 @@ export const FILTERS = {
   hash_port: (value) => String(10000 + (fnv1a(value) % 10000)),
 };
 
-// The only variable that can exist and still have nothing in it.
-const UNSET_REASONS = {
-  branch: "the worktree has no branch checked out",
-};
-
 /** The variables every `post_create` entry can use, from the hook's own context. */
 export function worktreeVariables({ worktreePath, repoRoot, branch }) {
   return {
@@ -92,9 +87,12 @@ function substitute(expression, vars, platform) {
   // later and somewhere far less obvious than here.
   const value = vars[name];
   if (value === null || value === undefined || value === "") {
-    throw new TemplateError(
-      `"${name}" has no value here: ${UNSET_REASONS[name] ?? "nothing in this run supplies it"}`,
-    );
+    // `branch` is the only variable that can exist and still hold nothing.
+    const reason =
+      name === "branch"
+        ? "the worktree has no branch checked out"
+        : "nothing in this run supplies it";
+    throw new TemplateError(`"${name}" has no value here: ${reason}`);
   }
 
   const filterName = parts[1]?.trim();

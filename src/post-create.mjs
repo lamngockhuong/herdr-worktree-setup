@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { result } from "./report.mjs";
 import { render } from "./template.mjs";
 
 export const TRUST_FILENAME = "trusted-repos.txt";
@@ -33,13 +34,22 @@ function canonical(path) {
   } catch {
     // The path may not exist; the resolved form is the closest we can get.
   }
-  return process.platform === "win32" ? resolved.replaceAll("\\", "/").toLowerCase() : resolved;
+  return IS_WINDOWS ? resolved.replaceAll("\\", "/").toLowerCase() : resolved;
 }
 
 export function isTrusted(repoRoot, trusted, env = process.env) {
   if (env.HERDR_WORKTREE_SETUP_TRUST_ALL === "1") return true;
   const target = canonical(repoRoot);
   return trusted.some((entry) => canonical(entry) === target);
+}
+
+/**
+ * The gate `post_create` passes through, wiring included. `--dry-run` has to
+ * reach the same verdict as a real run, so both ask this rather than each
+ * assembling the trust list and the environment for itself.
+ */
+export function trustedForCommands(repoRoot, configDir, env = process.env) {
+  return isTrusted(repoRoot, readTrustList(configDir), env);
 }
 
 /**
@@ -76,6 +86,19 @@ function spawnFailure(error) {
   return error.message;
 }
 
+// Why one finished command counts as a failure, or null when it did not.
+function failureDetail(run, timeoutMs) {
+  if (run.error?.code === "ETIMEDOUT") {
+    return (
+      `timed out after ${timeoutMs}ms; the shell was killed, but anything it ` +
+      "had already started may still be running in the worktree"
+    );
+  }
+  if (run.error) return spawnFailure(run.error);
+  if (run.status !== 0) return `exit code ${run.status}`;
+  return null;
+}
+
 /**
  * Render and run each configured command in the new checkout, stopping at the
  * first failure so a broken install does not cascade into confusing follow-up
@@ -88,17 +111,11 @@ export function runPostCreate(
 ) {
   if (commands.length === 0) return [];
 
-  if (!isTrusted(repoRoot, readTrustList(configDir), env)) {
-    return [
-      {
-        action: "post_create",
-        path: repoRoot,
-        status: "skipped",
-        detail:
-          `repository is not trusted for commands. To allow it, add this line to ` +
-          `${join(configDir ?? "<plugin config dir>", TRUST_FILENAME)}: ${repoRoot}`,
-      },
-    ];
+  if (!trustedForCommands(repoRoot, configDir, env)) {
+    const detail =
+      `repository is not trusted for commands. To allow it, add this line to ` +
+      `${join(configDir ?? "<plugin config dir>", TRUST_FILENAME)}: ${repoRoot}`;
+    return [result("post_create", repoRoot, "skipped", detail)];
   }
 
   const results = [];
@@ -109,12 +126,7 @@ export function runPostCreate(
     try {
       rendered = render(command, vars);
     } catch (error) {
-      results.push({
-        action: "post_create",
-        path: command,
-        status: "failed",
-        detail: error.message,
-      });
+      results.push(result("post_create", command, "failed", error.message));
       break;
     }
 
@@ -123,37 +135,13 @@ export function runPostCreate(
     const output = `${run.stdout ?? ""}${run.stderr ?? ""}`.trim();
     if (output) console.log(output);
 
-    if (run.error?.code === "ETIMEDOUT") {
-      results.push({
-        action: "post_create",
-        path: rendered,
-        status: "failed",
-        detail:
-          `timed out after ${timeoutMs}ms; the shell was killed, but anything it ` +
-          "had already started may still be running in the worktree",
-      });
-      break;
-    }
-    if (run.error) {
-      results.push({
-        action: "post_create",
-        path: rendered,
-        status: "failed",
-        detail: spawnFailure(run.error),
-      });
-      break;
-    }
-    if (run.status !== 0) {
-      results.push({
-        action: "post_create",
-        path: rendered,
-        status: "failed",
-        detail: `exit code ${run.status}`,
-      });
+    const failure = failureDetail(run, timeoutMs);
+    if (failure) {
+      results.push(result("post_create", rendered, "failed", failure));
       break;
     }
 
-    results.push({ action: "post_create", path: rendered, status: "done" });
+    results.push(result("post_create", rendered, "done"));
   }
   return results;
 }

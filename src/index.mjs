@@ -4,10 +4,10 @@
 import { pathToFileURL } from "node:url";
 import { copyEntry, exampleSeeds, seedFromExamples, symlinkEntry } from "./apply.mjs";
 import { CONFIG_FILENAME, loadConfig } from "./config.mjs";
-import { pluginContext, readContext } from "./context.mjs";
+import { contextCwd, readContext } from "./context.mjs";
 import { detectFiles } from "./detect.mjs";
 import { currentBranch, mainWorktree, worktreeRoot } from "./git.mjs";
-import { isTrusted, readTrustList, runPostCreate, TRUST_FILENAME } from "./post-create.mjs";
+import { runPostCreate, TRUST_FILENAME, trustedForCommands } from "./post-create.mjs";
 import { notify, printReport, summarize, summaryLine } from "./report.mjs";
 import { render, worktreeVariables } from "./template.mjs";
 
@@ -18,8 +18,7 @@ function collectCopyTargets(repoRoot, config) {
 
   // Explicit entries win over the exclude list: naming a path is a deliberate
   // choice, while excludes exist to trim what auto-detection guessed.
-  const explicit = config.copy.map((entry) => entry.replaceAll("\\", "/"));
-  return [...new Set([...detected, ...explicit])];
+  return [...new Set([...detected, ...config.copy])];
 }
 
 /**
@@ -27,7 +26,7 @@ function collectCopyTargets(repoRoot, config) {
  * argument, then the worktree or workspace Herdr says is in focus, then the
  * current directory — the order `src/init.mjs` resolves a repository in.
  */
-export function resolveDryRunTarget(env = process.env, argv = []) {
+function resolveDryRunTarget(env = process.env, argv = []) {
   const explicit = argv.find((argument) => !argument.startsWith("-"));
 
   if (!explicit) {
@@ -39,9 +38,7 @@ export function resolveDryRunTarget(env = process.env, argv = []) {
     }
   }
 
-  const context = pluginContext(env);
-  const cwd = explicit ?? context?.workspace_cwd ?? context?.focused_pane_cwd ?? process.cwd();
-  const worktreePath = worktreeRoot(cwd);
+  const worktreePath = worktreeRoot(explicit ?? contextCwd(env));
 
   return {
     worktreePath,
@@ -61,7 +58,7 @@ const preview = (verb, path, detail) =>
 function dryRun({ worktreePath, repoRoot }, config, vars, env) {
   console.log("dry run: nothing is linked, copied, seeded or executed");
 
-  for (const relative of config.symlink) preview("link", relative.replaceAll("\\", "/"));
+  for (const relative of config.symlink) preview("link", relative);
   for (const relative of collectCopyTargets(repoRoot, config)) preview("copy", relative);
 
   if (config.seed_from_example) {
@@ -72,7 +69,7 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env) {
 
   if (
     config.post_create.length > 0 &&
-    !isTrusted(repoRoot, readTrustList(env.HERDR_PLUGIN_CONFIG_DIR), env)
+    !trustedForCommands(repoRoot, env.HERDR_PLUGIN_CONFIG_DIR, env)
   ) {
     // Said before the commands, so the lines below read as what they resolve
     // to rather than as a promise that any of them would run.
@@ -115,7 +112,7 @@ export function run(env = process.env, argv = []) {
   // of every detected file, and a directory the user asked to link would then
   // already exist by the time its turn came, so the link was quietly dropped.
   for (const relative of config.symlink) {
-    results.push(symlinkEntry(repoRoot, worktreePath, relative.replaceAll("\\", "/")));
+    results.push(symlinkEntry(repoRoot, worktreePath, relative));
   }
 
   for (const relative of collectCopyTargets(repoRoot, config)) {
