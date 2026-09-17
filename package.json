@@ -1,6 +1,6 @@
 {
   "name": "herdr-worktree-setup",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Herdr plugin that prepares every new worktree: auto-detected config files, shared-directory links, and opt-in setup commands",
   "license": "MIT",
   "author": "Lam Ngoc Khuong <hi@khuong.dev>",

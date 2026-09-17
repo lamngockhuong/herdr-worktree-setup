@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.2.0...v0.3.0) (2026-09-17)
+
+
+### Features
+
+* **dry-run:** show the preview in a Herdr pane ([#12](https://github.com/lamngockhuong/herdr-worktree-setup/issues/12)) ([ee214cc](https://github.com/lamngockhuong/herdr-worktree-setup/commit/ee214cc07956d22331760cca790f3bf78047c886))
+* **post-remove:** run teardown commands when a worktree is removed ([#15](https://github.com/lamngockhuong/herdr-worktree-setup/issues/15)) ([1fa9d16](https://github.com/lamngockhuong/herdr-worktree-setup/commit/1fa9d16020df83d21ba1d36ddaa5015c3201be8a))
+
 ## [0.2.0](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.1.0...v0.2.0) (2026-09-17)
 
 
