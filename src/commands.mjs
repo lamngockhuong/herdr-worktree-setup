@@ -8,9 +8,11 @@ export const TRUST_FILENAME = "trusted-repos.txt";
 
 const IS_WINDOWS = process.platform === "win32";
 
-// `post_create` runs commands that a repository chose. Cloning someone's
-// project and opening a worktree must not be enough to execute them, so the
-// machine's owner opts each repository in by hand, outside the repository.
+// `post_create` and `post_remove` run commands that a repository chose.
+// Cloning someone's project and opening a worktree must not be enough to
+// execute them, so the machine's owner opts each repository in by hand,
+// outside the repository. One list covers both: a repository trusted to set a
+// worktree up is trusted to tear it down again.
 export function readTrustList(configDir) {
   if (!configDir) return [];
   try {
@@ -44,8 +46,8 @@ export function isTrusted(repoRoot, trusted, env = process.env) {
 }
 
 /**
- * The gate `post_create` passes through, wiring included. `--dry-run` has to
- * reach the same verdict as a real run, so both ask this rather than each
+ * The gate both command blocks pass through, wiring included. `--dry-run` has
+ * to reach the same verdict as a real run, so both ask this rather than each
  * assembling the trust list and the environment for itself.
  */
 export function trustedForCommands(repoRoot, configDir, env = process.env) {
@@ -91,7 +93,7 @@ function failureDetail(run, timeoutMs) {
   if (run.error?.code === "ETIMEDOUT") {
     return (
       `timed out after ${timeoutMs}ms; the shell was killed, but anything it ` +
-      "had already started may still be running in the worktree"
+      "had already started may still be running"
     );
   }
   if (run.error) return spawnFailure(run.error);
@@ -100,14 +102,15 @@ function failureDetail(run, timeoutMs) {
 }
 
 /**
- * Render and run each configured command in the new checkout, stopping at the
- * first failure so a broken install does not cascade into confusing follow-up
- * errors.
+ * Render and run each configured command in `cwd`, stopping at the first
+ * failure so a broken install does not cascade into confusing follow-up
+ * errors. `action` names the block in the report, and every caller states it:
+ * the two blocks are equal here, and a default would quietly mislabel a third.
  */
-export function runPostCreate(
-  worktreePath,
+export function runCommands(
+  cwd,
   commands,
-  { timeoutMs, configDir, repoRoot, env, vars = {} },
+  { timeoutMs, configDir, repoRoot, env, vars = {}, action },
 ) {
   if (commands.length === 0) return [];
 
@@ -115,7 +118,7 @@ export function runPostCreate(
     const detail =
       `repository is not trusted for commands. To allow it, add this line to ` +
       `${join(configDir ?? "<plugin config dir>", TRUST_FILENAME)}: ${repoRoot}`;
-    return [result("post_create", repoRoot, "skipped", detail)];
+    return [result(action, repoRoot, "skipped", detail)];
   }
 
   const results = [];
@@ -126,22 +129,22 @@ export function runPostCreate(
     try {
       rendered = render(command, vars);
     } catch (error) {
-      results.push(result("post_create", command, "failed", error.message));
+      results.push(result(action, command, "failed", error.message));
       break;
     }
 
-    const run = spawnCommand(rendered, worktreePath, timeoutMs);
+    const run = spawnCommand(rendered, cwd, timeoutMs);
 
     const output = `${run.stdout ?? ""}${run.stderr ?? ""}`.trim();
     if (output) console.log(output);
 
     const failure = failureDetail(run, timeoutMs);
     if (failure) {
-      results.push(result("post_create", rendered, "failed", failure));
+      results.push(result(action, rendered, "failed", failure));
       break;
     }
 
-    results.push(result("post_create", rendered, "done"));
+    results.push(result(action, rendered, "done"));
   }
   return results;
 }

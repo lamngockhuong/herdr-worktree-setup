@@ -1,22 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { isTrusted, readTrustList, TRUST_FILENAME } from "../src/post-create.mjs";
-import { cleanup, makeRepo, write } from "./helpers.mjs";
+import { isTrusted, readTrustList, TRUST_FILENAME } from "../src/commands.mjs";
+import { cleanup, configDir, makeRepo, write } from "./helpers.mjs";
 
 after(cleanup);
 
 test("reads one path per line and ignores comments and blanks", () => {
-  const dir = mkdtempSync(join(tmpdir(), "herdr-wt-trust-"));
+  const dir = configDir(null);
   write(dir, TRUST_FILENAME, ["# repositories I wrote", "", "/one", "  /two  ", ""].join("\n"));
 
   assert.deepEqual(readTrustList(dir), ["/one", "/two"]);
 });
 
 test("a missing trust file trusts nothing rather than failing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "herdr-wt-trust-"));
+  const dir = configDir(null);
   assert.deepEqual(readTrustList(dir), []);
   assert.equal(isTrusted("/anywhere", [], {}), false);
 });
