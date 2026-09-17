@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +6,7 @@ import { after, test } from "node:test";
 import { run } from "../src/index.mjs";
 import { runPostCreate, TRUST_FILENAME } from "../src/post-create.mjs";
 import { worktreeVariables } from "../src/template.mjs";
-import { addWorktree, cleanup, makeRepo, pluginEnv, write } from "./helpers.mjs";
+import { addWorktree, cleanup, makeRepo, pluginEnv, runEntry, write } from "./helpers.mjs";
 
 after(cleanup);
 
@@ -211,14 +210,7 @@ test("--dry-run prints the rendered command and touches nothing", () => {
   const worktree = addWorktree(repo, "dry");
   const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDirWith(repo) }, "dry");
 
-  const result = spawnSync(
-    process.execPath,
-    [join(import.meta.dirname, "../src/index.mjs"), "--dry-run"],
-    {
-      env: { ...process.env, ...env },
-      encoding: "utf8",
-    },
-  );
+  const result = runEntry("src/index.mjs", ["--dry-run"], env);
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /would link shared/);
@@ -235,14 +227,10 @@ test("--dry-run resolves the worktree from a path argument", () => {
   write(repo, ".env", "FROM=main");
   const worktree = addWorktree(repo, "dry-argv");
 
-  const result = spawnSync(
-    process.execPath,
-    [join(import.meta.dirname, "../src/index.mjs"), "--dry-run", worktree],
-    {
-      env: { ...process.env, HERDR_PLUGIN_CONTEXT_JSON: "", HERDR_PLUGIN_EVENT_JSON: "" },
-      encoding: "utf8",
-    },
-  );
+  const result = runEntry("src/index.mjs", ["--dry-run", worktree], {
+    HERDR_PLUGIN_CONTEXT_JSON: "",
+    HERDR_PLUGIN_EVENT_JSON: "",
+  });
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /would copy \.env/);

@@ -147,12 +147,17 @@ export function run(env = process.env, argv = []) {
   return summary.failed > 0 ? 1 : 0;
 }
 
-// Only act when Herdr invokes the file; importing it in tests must stay inert.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/** `run` with the failure report every caller outside the tests owes the log. */
+export function runCli(env = process.env, argv = []) {
   try {
-    process.exitCode = run(process.env, process.argv.slice(2));
+    return run(env, argv);
   } catch (error) {
     console.error(`worktree setup failed: ${error.message}`);
-    process.exitCode = 1;
+    return 1;
   }
+}
+
+// Only act when Herdr invokes the file; importing it in tests must stay inert.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exitCode = runCli(process.env, process.argv.slice(2));
 }

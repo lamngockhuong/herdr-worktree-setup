@@ -62,6 +62,14 @@ export function pluginEnv(repoRoot, worktreePath, extra = {}, branch = "feature"
   };
 }
 
+/** Run one of the plugin's entry points the way Herdr runs it: as a child. */
+export function runEntry(script, argv = [], env = {}) {
+  return spawnSync(process.execPath, [join(import.meta.dirname, "..", script), ...argv], {
+    env: { ...process.env, ...env },
+    encoding: "utf8",
+  });
+}
+
 export function cleanup() {
   for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });
 }
