@@ -179,14 +179,21 @@ Ba điều đáng nhớ:
 herdr plugin action invoke lamngockhuong.worktree-setup.dry-run
 ```
 
-Lệnh này in ra cả lượt chạy mà không làm gì cả: không tạo link, không chép, không dựng file từ mẫu, không chạy lệnh nào.
+Action này mở một pane đè lên workspace và in cả lượt chạy ở đó mà không làm gì cả: không tạo link, không chép, không dựng file từ mẫu, không chạy lệnh nào.
 
 ```
+worktree /đường/dẫn/worktree
+repository /đường/dẫn/repo (feature/checkout)
+config .herdr-worktree.toml
 dry run: nothing is linked, copied, seeded or executed
 would link shared
 would copy apps/api/.env.local
 would run  pnpm dev --port '13706'
+
+press any key to close
 ```
+
+Cái pane mới là điểm mấu chốt. Herdr gom stdout của một plugin action vào log lệnh và không hiển thị nó ở đâu cả, nên một bản xem trước do chính action in ra là bản xem trước không ai đọc. Pane đóng lại ngay khi bạn bấm phím tiếp theo. Khi Herdr từ chối mở pane — vì đang có một modal khác — action sẽ nói rõ lý do rồi quay về in bản xem trước vào log, nơi `herdr plugin log list` đọc được.
 
 Các lệnh hiện ra đã thay biến và bọc nháy đúng như khi đến tay shell, và đó là cách nhanh nhất để thấy một chỗ điền cho ra giá trị gì. Những dòng link, chép và dựng từ mẫu là danh sách đích đã được xác định, không phải lời hứa rằng từng cái sẽ thành công. Một chỗ điền không thay được sẽ được báo ra và lượt chạy kết thúc với mã khác 0.
 

@@ -179,14 +179,21 @@ Three rules worth knowing:
 herdr plugin action invoke lamngockhuong.worktree-setup.dry-run
 ```
 
-It prints the run without performing it — nothing is linked, copied, seeded or executed:
+The action opens a pane over the workspace and prints the run there without performing it — nothing is linked, copied, seeded or executed:
 
 ```
+worktree /path/to/worktree
+repository /path/to/repo (feature/checkout)
+config .herdr-worktree.toml
 dry run: nothing is linked, copied, seeded or executed
 would link shared
 would copy apps/api/.env.local
 would run  pnpm dev --port '13706'
+
+press any key to close
 ```
+
+The pane is the point. Herdr captures the stdout of a plugin action into the command log and displays it nowhere, so a preview the action printed itself would be a preview nobody reads. The pane closes on the next key you press. When Herdr will not open one — another modal is already up — the action says so and falls back to printing the preview into the log, where `herdr plugin log list` finds it.
 
 Commands appear rendered and quoted exactly as they would reach the shell, which is the fastest way to see what a template resolves to. The copy, link and seed lines are the targets as they were resolved, not a promise that each one would succeed. A template that cannot be rendered is reported and exits non-zero.
 

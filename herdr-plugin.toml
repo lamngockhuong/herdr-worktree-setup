@@ -17,7 +17,16 @@ id = "dry-run"
 title = "Preview worktree setup"
 description = "Print what the plugin would copy, link, seed and run here, without doing any of it"
 contexts = ["workspace"]
-command = ["node", "src/index.mjs", "--dry-run"]
+command = ["node", "src/preview.mjs"]
+
+# The preview is rendered here rather than by the action: Herdr captures action
+# output into the plugin log and shows it nowhere. `overlay` keeps the minimum
+# Herdr version at 0.7.0; `popup` would raise it to 0.7.4.
+[[panes]]
+id = "preview"
+title = "Worktree setup preview"
+placement = "overlay"
+command = ["node", "src/preview.mjs", "--pane"]
 
 [[events]]
 on = "worktree.created"
