@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.3.0...v0.3.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **dry-run:** name the trust file in full, as a real run does ([#16](https://github.com/lamngockhuong/herdr-worktree-setup/issues/16)) ([7015e4f](https://github.com/lamngockhuong/herdr-worktree-setup/commit/7015e4f49a32fb516381d784dc9b15321df4a2f5))
+
 ## [0.3.0](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.2.0...v0.3.0) (2026-09-17)
 
 
