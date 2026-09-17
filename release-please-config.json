@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "last-release-sha": "b3a86416772ca94864a2a51e1a289c18a3644ef0",
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "herdr-worktree-setup",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": false,
+      "bump-minor-pre-major": true,
+      "extra-files": [{ "type": "toml", "path": "herdr-plugin.toml", "jsonpath": "$.version" }]
+    }
+  }
+}
