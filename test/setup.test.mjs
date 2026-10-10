@@ -171,7 +171,10 @@ test("refuses to write through a dangling symlinked directory in the worktree", 
     pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() }),
   );
   assert.equal(child.status, 1);
-  assert.match(child.stdout, /refused: the target path leaves/);
+  assert.match(
+    child.stdout,
+    /refused: the target path goes through a symlink whose destination does not exist yet/,
+  );
   assert.equal(existsSync(join(outside, "missing")), false);
 });
 

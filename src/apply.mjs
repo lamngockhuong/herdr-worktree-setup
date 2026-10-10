@@ -64,7 +64,12 @@ function isWithin(path, root) {
  */
 function escapesThroughLink(path, root, side) {
   const real = realAncestor(dirname(path));
-  if (real !== undefined && isWithin(real, realpathSync(root))) return undefined;
+  // A dangling link may well point inside; it is refused because nothing can
+  // tell yet, so the message must not claim it leaves.
+  if (real === undefined) {
+    return `refused: the ${side} path goes through a symlink whose destination does not exist yet, so it cannot be checked against ${root}`;
+  }
+  if (isWithin(real, realpathSync(root))) return undefined;
   return `refused: the ${side} path leaves ${root} through a symlinked directory`;
 }
 
