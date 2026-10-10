@@ -264,8 +264,10 @@ test("fails loudly when Herdr passes no worktree at all", () => {
 
 // `write-arg.cjs` records the single argument it is given, so a test can prove
 // the branch name arrived as one literal argument instead of being re-parsed by
-// the shell. Every branch below is a name `git check-ref-format` accepts.
-for (const branch of ["a;b", "a`b", "feat/50%", "a!b"]) {
+// the shell. Every branch below is a name `git check-ref-format` accepts. The
+// typographic quotes are single quotes to PowerShell, so on Windows they would
+// close the quoting early and run what follows.
+for (const branch of ["a;b", "a`b", "feat/50%", "a!b", "x’;exit(7);’", "a‘b‚c‛d"]) {
   test(`a branch named ${branch} reaches the command verbatim`, () => {
     const repo = repoRunningCommand("post_create", "node write-arg.cjs {{ branch }}");
     const worktree = addWorktree(repo, branch);

@@ -51,8 +51,10 @@ export function worktreeVariables({ worktreePath, repoRoot, branch }) {
  */
 export function shellEscape(value, platform = process.platform) {
   // A single-quoted PowerShell string is literal — no escape sequences, no `%`
-  // expansion, no delayed `!` expansion — and doubling `'` closes nothing.
-  if (platform === "win32") return `'${value.replaceAll("'", "''")}'`;
+  // expansion, no delayed `!` expansion — and doubling a quote closes nothing.
+  // PowerShell's tokenizer also ends the string on the typographic quotes
+  // U+2018 to U+201B, so a branch named with `’` needs them doubled too.
+  if (platform === "win32") return `'${value.replace(/['‘-‛]/g, "$&$&")}'`;
   // POSIX single quotes end at the first `'`, so close, escape, and reopen.
   return `'${value.replaceAll("'", "'\\''")}'`;
 }

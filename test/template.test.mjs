@@ -65,6 +65,9 @@ test("one branch keeps one port, and two branches get two", () => {
 test("escapes a substituted value per platform", () => {
   assert.equal(shellEscape("a'b", "linux"), "'a'\\''b'");
   assert.equal(shellEscape("a'b", "win32"), "'a''b'");
+  // PowerShell closes a single-quoted string on any of these as well.
+  assert.equal(shellEscape("a‘b’c‚d‛e", "win32"), "'a‘‘b’’c‚‚d‛‛e'");
+  assert.equal(shellEscape("a’b", "linux"), "'a’b'");
 
   const vars = worktreeVariables({ worktreePath: "/w", repoRoot: "/r", branch: "a;rm -rf ~" });
   assert.equal(render("run {{ branch }}", vars, "linux"), "run 'a;rm -rf ~'");
