@@ -112,7 +112,7 @@ notify = true
 | `post_remove_timeout_ms` | số nguyên | `600000` |
 | `notify` | boolean | `true` |
 
-Gõ sai tên key là lỗi chứ không phải chuyện cho qua: plugin nêu đúng tên sai và liệt kê các key hợp lệ. Mục trong `copy` và `symlink` phải nằm bên trong repository — đường dẫn tuyệt đối và `..` đều bị từ chối.
+Gõ sai tên key là lỗi chứ không phải chuyện cho qua: plugin nêu đúng tên sai và liệt kê các key hợp lệ. Mục trong `copy` và `symlink` phải nằm bên trong repository — đường dẫn tuyệt đối và `..` đều bị từ chối. Mục nào đi ra ngoài repository hoặc ngoài worktree mới qua một thư mục symlink nằm giữa đường cũng bị từ chối: mục đó báo `failed` và không có gì được ghi. Bản thân mục là một link thì vẫn được, plugin tạo lại nó thành link, nên khi `data` trỏ sang chỗ khác thì hãy khai báo `data` thay vì `data/big`.
 
 File được đọc bằng một lát cắt rất nhỏ của TOML, hẹp như vậy là có chủ ý: dòng chú thích, `key = value`, và một cấp tiêu đề `[section]`, trong đó giá trị là boolean, số nguyên, chuỗi, hoặc danh sách những kiểu đó. Cú pháp khác sẽ báo lỗi rõ ràng thay vì âm thầm hiểu sai.
 

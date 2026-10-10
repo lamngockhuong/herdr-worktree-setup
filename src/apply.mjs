@@ -1,5 +1,13 @@
-import { cpSync, lstatSync, mkdirSync, readlinkSync, statSync, symlinkSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative as relativePath, sep } from "node:path";
 import { exampleTarget, matchesAny } from "./detect.mjs";
 import { trackedFiles } from "./git.mjs";
 import { result } from "./report.mjs";
@@ -26,6 +34,38 @@ function isDirectory(path) {
 
 function ensureParent(path) {
   mkdirSync(dirname(path), { recursive: true });
+}
+
+// The deepest part of `path` that exists, with every symlink in it resolved,
+// or undefined when that part is a dangling link: it points somewhere that does
+// not exist yet, so nothing can say where creating it would land. Components
+// below a real directory do not exist, so none of them can be a link.
+function realAncestor(path) {
+  for (let current = path; ; current = dirname(current)) {
+    try {
+      return realpathSync(current);
+    } catch (error) {
+      if (error.code !== "ENOENT" || dirname(current) === current) throw error;
+      if (pathExists(current)) return undefined;
+    }
+  }
+}
+
+function isWithin(path, root) {
+  const rel = relativePath(root, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/**
+ * Why `path` would leave `root` through a symlinked directory, or undefined
+ * when it stays inside. The config check only sees the spelling, and a
+ * directory turned into a link escapes without a `..` in it. The last component
+ * is left alone: a link there is reproduced as a link, never read through.
+ */
+function escapesThroughLink(path, root, side) {
+  const real = realAncestor(dirname(path));
+  if (real !== undefined && isWithin(real, realpathSync(root))) return undefined;
+  return `refused: the ${side} path leaves ${root} through a symlinked directory`;
 }
 
 // One unwritable file must not abandon everything after it. The failure lands
@@ -67,6 +107,13 @@ function placeEntry(action, repoRoot, worktreePath, relative, write) {
   if (pathExists(target)) return result(action, relative, "skipped", "already in the worktree");
 
   return attempt(action, relative, () => {
+    // Checked before the parent is created, so a refused entry leaves no
+    // directory behind outside the worktree either.
+    const refusal =
+      escapesThroughLink(source, repoRoot, "source") ??
+      escapesThroughLink(target, worktreePath, "target");
+    if (refusal) return result(action, relative, "failed", refusal);
+
     ensureParent(target);
     return result(action, relative, "done", write(source, target));
   });
@@ -113,6 +160,10 @@ export function exampleSeeds(worktreePath, patterns) {
  * Fill gaps from committed placeholders: every tracked `*.example` whose real
  * counterpart is still missing gets a starting copy. Off by default, because a
  * file full of placeholder values can be worse than an obvious absence.
+ *
+ * No containment check, unlike `placeEntry`: the source is tracked and the
+ * target is its sibling, and git never checks a tracked file out beneath a
+ * symlinked directory, so both already sit in a real directory of the worktree.
  */
 export function seedFromExamples(worktreePath, patterns) {
   return exampleSeeds(worktreePath, patterns).map(({ source, target }) =>
