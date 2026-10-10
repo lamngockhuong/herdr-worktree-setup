@@ -119,7 +119,13 @@ test("refuses to write through a symlinked directory in the worktree", () => {
   const worktree = addWorktree(repo, "escape-write");
   symlinkSync(outside, join(worktree, "dir"), "junction");
 
-  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() })), 1);
+  const child = runEntry(
+    "src/index.mjs",
+    [],
+    pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() }),
+  );
+  assert.equal(child.status, 1);
+  assert.match(child.stdout, /refused: the target path leaves/);
   assert.equal(existsSync(join(outside, "autostart")), false);
 });
 
@@ -134,7 +140,13 @@ test("refuses to copy through a symlinked directory in the main checkout", () =>
   );
   const worktree = addWorktree(repo, "escape-read");
 
-  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() })), 1);
+  const child = runEntry(
+    "src/index.mjs",
+    [],
+    pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() }),
+  );
+  assert.equal(child.status, 1);
+  assert.match(child.stdout, /refused: the source path leaves/);
   assert.equal(existsSync(join(worktree, "keys")), false);
 });
 
@@ -171,7 +183,13 @@ test("refuses to link through a symlinked directory in the worktree", () => {
   const worktree = addWorktree(repo, "escape-link");
   symlinkSync(outside, join(worktree, "dir"), "junction");
 
-  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() })), 1);
+  const child = runEntry(
+    "src/index.mjs",
+    [],
+    pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() }),
+  );
+  assert.equal(child.status, 1);
+  assert.match(child.stdout, /refused: the target path leaves/);
   assert.equal(existsSync(join(outside, "autostart")), false);
 });
 
