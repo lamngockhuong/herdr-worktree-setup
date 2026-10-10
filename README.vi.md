@@ -124,14 +124,27 @@ Mặc định tắt, và đây là một lựa chọn đáng giải thích. Mộ
 
 ## Lệnh cài đặt và quyền tin cậy
 
-`post_create` và `post_remove` chạy những lệnh do *repository* chọn. Chỉ clone dự án của người khác rồi mở một worktree thì không bao giờ được phép đủ để các lệnh đó chạy, nên chủ máy phải tự cho phép từng repository, từ bên ngoài repository:
+`post_create` và `post_remove` chạy những lệnh do *repository* chọn. Chỉ clone dự án của người khác rồi mở một worktree thì không bao giờ được phép đủ để các lệnh đó chạy, nên chủ máy phải tự cho phép từng repository, từ bên ngoài repository, với đúng những lệnh nó đang có:
 
 ```bash
+herdr plugin action invoke lamngockhuong.worktree-setup.dry-run   # đọc các lệnh trước
 herdr plugin config-dir lamngockhuong.worktree-setup
-# thêm đường dẫn tuyệt đối của repository vào trusted-repos.txt trong thư mục đó
+# thêm dòng mà dry run in ra vào trusted-repos.txt trong thư mục đó
 ```
 
-Mỗi dòng một đường dẫn tuyệt đối; dấu `#` mở đầu phần chú thích. Chừng nào repository chưa có trong danh sách đó, cả hai khối lệnh của nó đều bị bỏ qua và log in ra đúng dòng cần thêm. Một danh sách dùng chung cho cả hai: repository đã được tin cậy để dựng worktree lên thì cũng được tin cậy để dọn nó đi.
+Mỗi dòng gồm đường dẫn tuyệt đối của repository và một mã hash của hai khối lệnh; dấu `#` mở đầu phần chú thích:
+
+```text
+/home/you/projects/my-app sha256:3f9a…
+```
+
+Bạn không bao giờ phải tự tính hash. Chừng nào chưa có dòng khớp, cả hai khối đều bị bỏ qua, thông báo của Herdr nói rõ các lệnh đã bị bỏ qua, còn log và dry run in ra đúng dòng cần thêm. Một dòng dùng chung cho cả hai khối: repository đã được tin cậy để dựng worktree lên thì cũng được tin cậy để dọn nó đi.
+
+Mã hash ngăn một nhánh mượn quyền tin cậy đó. Lệnh được đọc từ nội dung đang có trong main checkout, nên nếu chỉ có đường dẫn, bạn checkout một pull request để xem xét là đủ để worktree kế tiếp chạy bất cứ thứ gì nhánh đó đặt vào `post_create`. Đổi một trong hai khối, trên nhánh nào cũng vậy, thì cả hai lại bị bỏ qua cho đến khi bạn thêm dòng mới. Cách trình bày, chú thích và mọi khoá khác không nằm trong hash, nên sửa `copy` hay `notify` không bắt bạn làm gì. Nhiều dòng có thể cùng chỉ một repository, tiện khi bạn chuyển qua lại giữa hai nhánh có lệnh khác nhau.
+
+Hash chỉ khoá văn bản của lệnh, không khoá mã mà lệnh chạy. `pnpm install`, `make setup` hay `./scripts/setup.sh` chạy file của repository, và `post_create` chạy bên trong worktree mới, nên tin cậy một lệnh như vậy nghĩa là tin mã đó trên mọi nhánh bạn tạo worktree.
+
+**Nâng cấp từ bản 0.3 trở về trước:** dòng chỉ có đường dẫn không còn cho quyền tin cậy. Lần chạy đầu sau khi nâng cấp sẽ bỏ qua các lệnh và ghi vào log dòng cần thay vào.
 
 `HERDR_WORKTREE_SETUP_TRUST_ALL=1` tắt hẳn lớp chặn này. Chỉ đặt biến đó nếu mọi repository bạn mở đều do chính bạn viết.
 
@@ -203,8 +216,8 @@ Có bốn điểm khác `post_create` đáng nhớ:
 
 - **Lệnh chạy trong repository, không phải trong worktree.** Lúc sự kiện bắn ra thì checkout đã bị xóa, nên không còn thư mục nào để chạy trong đó và cũng chẳng còn gì ở đó để đọc. Thứ gì mà lệnh dọn cần tìm thì nó tìm theo tên.
 - **`{{ branch }}` vẫn dùng được.** Giá trị đó đến từ sự kiện Herdr gửi sang, chứ không phải từ một lệnh git chạy trong thư mục đã biến mất. `{{ worktree_path }}` và `{{ worktree_name }}` vẫn gọi đúng tên thư mục đó, hữu ích khi một tài nguyên được đặt tên theo nó, và vô dụng nếu bạn định đọc một file bên trong.
-- **Chỉ thất bại mới hiện thông báo.** Bạn vừa xóa worktree và đã chuyển sang việc khác; một thông báo báo dọn xong sẽ làm phiền mà chẳng để làm gì, còn một thông báo báo dọn hỏng lại đúng là cách bạn biết vẫn còn container đang chạy. Dù thế nào thì log cũng giữ đủ báo cáo.
-- **Vẫn đúng một lớp tin cậy đó.** Repository có tên trong `trusted-repos.txt` thì được cả hai khối; không có tên thì không được khối nào.
+- **Chỉ khi việc dọn không diễn ra mới hiện thông báo.** Bạn vừa xóa worktree và đã chuyển sang việc khác; một thông báo báo dọn xong sẽ làm phiền mà chẳng để làm gì, còn một thông báo báo dọn hỏng, hoặc báo nó bị bỏ qua vì repository chưa được tin cậy để chạy lệnh dọn, lại đúng là cách bạn biết vẫn còn container đang chạy. Dù thế nào thì log cũng giữ đủ báo cáo.
+- **Vẫn đúng một lớp tin cậy đó.** Repository có dòng khớp trong `trusted-repos.txt` thì được cả hai khối; không có thì không được khối nào. Đổi một trong hai khối thì cả hai bị bỏ qua cho đến khi thêm dòng mới.
 
 `post_remove_timeout_ms` khống chế cả khối y như `post_create_timeout_ms`, và mặc định cũng là mười phút.
 
@@ -223,14 +236,16 @@ config .herdr-worktree.toml
 dry run: nothing is linked, copied, seeded or executed
 would link shared
 would copy apps/api/.env.local
+commands trusted (sha256:3f9a…)
 would run  docker compose -p 'demo'-'feature-checkout' up -d
+would run  docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v — on removal, shown unrendered
 
 press any key to close
 ```
 
 Cái pane mới là điểm mấu chốt. Herdr gom stdout của một plugin action vào log lệnh và không hiển thị nó ở đâu cả, nên một bản xem trước do chính action in ra là bản xem trước không ai đọc. Pane đóng lại ngay khi bạn bấm phím tiếp theo. Khi Herdr từ chối mở pane — vì đang có một modal khác — action sẽ nói rõ lý do rồi quay về in bản xem trước vào log, nơi `herdr plugin log list` đọc được.
 
-Các lệnh hiện ra đã thay biến và bọc nháy đúng như khi đến tay shell, và đó là cách nhanh nhất để thấy một chỗ điền cho ra giá trị gì. Những dòng link, chép và dựng từ mẫu là danh sách đích đã được xác định, không phải lời hứa rằng từng cái sẽ thành công. Một chỗ điền không thay được sẽ được báo ra và lượt chạy kết thúc với mã khác 0.
+Ngay trước các lệnh là một dòng cho biết chúng có được chạy hay không: repository đã được tin cậy thì dòng đó ghi mã hash đang có hiệu lực, chưa thì ghi lý do bị bỏ qua và đúng dòng cần thêm vào `trusted-repos.txt`. Các lệnh `post_create` hiện ra đã thay biến và bọc nháy đúng như khi đến tay shell, và đó là cách nhanh nhất để thấy một chỗ điền cho ra giá trị gì. Các lệnh `post_remove` được liệt kê nguyên văn, vì dòng tin cậy cũng phê duyệt chúng, còn biến của chúng chỉ được điền lúc xoá worktree. Những dòng link, chép và dựng từ mẫu là danh sách đích đã được xác định, không phải lời hứa rằng từng cái sẽ thành công. Một chỗ điền không thay được sẽ được báo ra và lượt chạy kết thúc với mã khác 0.
 
 Ngoài Herdr, `node src/index.mjs --dry-run /đường/dẫn/worktree` cho kết quả tương tự; nếu không đưa đường dẫn, plugin dùng workspace mà Herdr đang mở, hoặc thư mục hiện tại.
 

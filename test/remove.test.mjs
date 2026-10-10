@@ -10,6 +10,8 @@ import {
   makeRepo,
   removedEnv,
   repoRunningCommand,
+  runEntry,
+  write,
   writeArgScript,
 } from "./helpers.mjs";
 
@@ -68,6 +70,20 @@ test("skips the teardown of a repository nobody trusted", () => {
 
   assert.equal(run(env), 0);
   assert.equal(existsSync(join(repo, "torn-down.txt")), false);
+});
+
+test("skips a teardown that changed since the repository was trusted", () => {
+  const repo = repoTearingDown("node write-arg.cjs {{ branch }}");
+  const cfg = configDir(repo);
+  write(repo, ".herdr-worktree.toml", 'post_remove = ["node write-arg.cjs other"]\nnotify = false');
+  const worktree = goneWorktree(repo, "changed");
+  const env = removedEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: cfg }, "changed");
+
+  const result = runEntry("src/remove.mjs", [], env);
+
+  assert.equal(result.status, 0);
+  assert.equal(existsSync(join(repo, "torn-down.txt")), false);
+  assert.ok(result.stdout.includes("changed since this repository was trusted"), result.stdout);
 });
 
 test("does nothing at all for a repository that configured no teardown", () => {

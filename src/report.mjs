@@ -18,25 +18,36 @@ const LABELS = {
 export const result = (action, path, status, detail) =>
   detail === undefined ? { action, path, status } : { action, path, status, detail };
 
-/** Counts of what actually happened, keyed by action, ignoring skips. */
+// The only thing that skips a whole command block is the trust gate, so a
+// skipped command record means the block did not run at all. A skipped file is
+// the plugin declining to overwrite, which is not worth reporting.
+const COMMAND_ACTIONS = new Set(["post_create", "post_remove"]);
+
+/**
+ * Counts of what actually happened, keyed by action. Skipped files are
+ * ignored; a command block the trust gate skipped is counted as `untrusted`.
+ */
 export function summarize(results) {
   const done = {};
   let failed = 0;
+  let untrusted = 0;
   for (const item of results) {
     if (item.status === "failed") failed++;
+    if (item.status === "skipped" && COMMAND_ACTIONS.has(item.action)) untrusted++;
     if (item.status !== "done") continue;
     done[item.action] = (done[item.action] ?? 0) + 1;
   }
-  return { done, failed };
+  return { done, failed, untrusted };
 }
 
 /** One-line human summary, e.g. "copied 4 files, ran 1 command". */
-export function summaryLine({ done, failed }) {
+export function summaryLine({ done, failed, untrusted }) {
   const parts = Object.entries(done).map(([action, count]) => {
     const [verb, unit] = LABELS[action] ?? [action, "file"];
     return `${verb} ${count} ${count === 1 ? unit : `${unit}s`}`;
   });
   if (failed > 0) parts.push(`${failed} failed`);
+  if (untrusted > 0) parts.push("commands skipped: not trusted");
   return parts.length > 0 ? parts.join(", ") : "nothing to do";
 }
 
@@ -51,20 +62,31 @@ export function printReport(results) {
 /** A toast names the branch it is about, when the run knew one. */
 const body = (line, branch) => (branch ? `${branch}: ${line}` : line);
 
-/** The toast a finished setup deserves, which is one either way. */
-export const setupToast = (summary, line, branch) => ({
-  title: summary.failed > 0 ? "Worktree setup incomplete" : "Worktree ready",
-  body: body(line, branch),
-});
+/**
+ * The toast a finished setup deserves, which is one either way. Skipped
+ * commands get a title of their own: after the trust list changed format,
+ * "ready" over a worktree whose setup never ran would be the only thing seen.
+ */
+export function setupToast(summary, line, branch) {
+  let title = "Worktree ready";
+  if (summary.untrusted > 0) title = "Worktree ready, commands skipped";
+  if (summary.failed > 0) title = "Worktree setup incomplete";
+  return { title, body: body(line, branch) };
+}
 
 /**
  * The toast a finished teardown deserves, or null when it deserves none. Only
- * failure is worth one: the worktree is gone and the person has moved on, so a
- * notification saying the cleanup went fine interrupts for nothing, while one
- * saying it did not is how they learn a container is still running.
+ * a cleanup that did not happen is worth one: the worktree is gone and the
+ * person has moved on, so a notification saying the cleanup went fine
+ * interrupts for nothing, while one saying it failed, or never ran because the
+ * repository is not trusted for it, is how they learn a container is still
+ * running.
  */
-export const cleanupToast = (summary, line, branch) =>
-  summary.failed > 0 ? { title: "Worktree cleanup incomplete", body: body(line, branch) } : null;
+export function cleanupToast(summary, line, branch) {
+  if (summary.failed > 0) return { title: "Worktree cleanup incomplete", body: body(line, branch) };
+  if (summary.untrusted > 0) return { title: "Worktree cleanup skipped", body: body(line, branch) };
+  return null;
+}
 
 /**
  * Show a Herdr toast. Best effort on purpose: a missing server or CLI comes

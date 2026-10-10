@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, lstatSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { runCommands, TRUST_FILENAME } from "../src/commands.mjs";
+import { commandsHash, runCommands, TRUST_FILENAME } from "../src/commands.mjs";
+import { DEFAULTS, loadConfig } from "../src/config.mjs";
 import { run } from "../src/index.mjs";
 import { worktreeVariables } from "../src/template.mjs";
 import {
@@ -13,6 +14,7 @@ import {
   pluginEnv,
   repoRunningCommand,
   runEntry,
+  trustLineFor,
   write,
   writeArgScript,
 } from "./helpers.mjs";
@@ -377,9 +379,95 @@ test("the dry run names the trust file in full, as a real run does", () => {
   // preview must not send them looking for it by filename alone. A Windows
   // path is full of backslashes, so these are substrings rather than patterns.
   const path = join(cfg, TRUST_FILENAME);
+  const line = trustLineFor(repo);
   assert.ok(preview.stdout.includes(`would be skipped`), preview.stdout);
-  assert.ok(preview.stdout.includes(`is not listed in ${path}`), preview.stdout);
-  assert.ok(real.stdout.includes(`add this line to ${path}: ${repo}`), real.stdout);
+  assert.ok(preview.stdout.includes(`add this line to ${path}: ${line}`), preview.stdout);
+  assert.ok(real.stdout.includes(`add this line to ${path}: ${line}`), real.stdout);
+});
+
+test("commands changed since the repository was trusted are skipped, with the new line", () => {
+  const repo = repoRunningCommand("post_create", "node write-arg.cjs one");
+  const cfg = configDir(repo);
+  // What a branch checked out for review would do: same repository, other commands.
+  write(repo, ".herdr-worktree.toml", 'post_create = ["node write-arg.cjs two"]\nnotify = false');
+  const worktree = addWorktree(repo, "changed");
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: cfg }, "changed");
+
+  const real = runEntry("src/index.mjs", [], env);
+
+  assert.equal(existsSync(join(worktree, "arg.txt")), false);
+  const line = trustLineFor(repo);
+  assert.ok(real.stdout.includes("changed since this repository was trusted"), real.stdout);
+  assert.ok(real.stdout.includes(`add this line to ${join(cfg, TRUST_FILENAME)}: ${line}`));
+});
+
+test("a trust line holding only the path no longer runs anything", () => {
+  const repo = repoRunningCommand("post_create", "node write-arg.cjs one");
+  const cfg = configDir(null);
+  write(cfg, TRUST_FILENAME, `${repo}\n`);
+  const worktree = addWorktree(repo, "legacy");
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: cfg }, "legacy");
+
+  const preview = runEntry("src/index.mjs", ["--dry-run"], env);
+  const real = runEntry("src/index.mjs", [], env);
+
+  assert.equal(existsSync(join(worktree, "arg.txt")), false);
+  const line = trustLineFor(repo);
+  for (const output of [preview.stdout, real.stdout]) {
+    assert.ok(output.includes("without a hash, which no longer grants trust"), output);
+    assert.ok(output.includes(`replace that line with: ${line}`), output);
+  }
+});
+
+test("the dry run shows the hash in force and the teardown it also approves", () => {
+  const repo = makeRepo({ "write-arg.cjs": writeArgScript() });
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    'post_create = ["node write-arg.cjs up"]\npost_remove = ["node write-arg.cjs {{ branch }}"]',
+  );
+  const worktree = addWorktree(repo, "dry-trusted");
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir(repo) });
+
+  const preview = runEntry("src/index.mjs", ["--dry-run"], env);
+
+  const hash = commandsHash(loadConfig(repo));
+  assert.ok(preview.stdout.includes(`commands trusted (sha256:${hash})`), preview.stdout);
+  assert.ok(preview.stdout.includes("node write-arg.cjs {{ branch }}"), preview.stdout);
+  assert.ok(!preview.stdout.includes("would be skipped"), preview.stdout);
+});
+
+test("the dry run still lists the teardown when a setup template cannot render", () => {
+  // The trust line it prints approves both blocks, so stopping at the broken
+  // template would hide half of what the reader is being asked to approve.
+  const repo = makeRepo();
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    'post_create = ["echo {{ nope }}"]\npost_remove = ["node teardown.cjs"]',
+  );
+  const worktree = addWorktree(repo, "dry-broken");
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() });
+
+  const preview = runEntry("src/index.mjs", ["--dry-run"], env);
+
+  assert.equal(preview.status, 1);
+  assert.ok(preview.stdout.includes("would fail"), preview.stdout);
+  assert.ok(preview.stdout.includes("node teardown.cjs"), preview.stdout);
+});
+
+test("the dry run reports trust for a repository that only tears down", () => {
+  const repo = makeRepo();
+  write(repo, ".herdr-worktree.toml", 'post_remove = ["node teardown.cjs"]');
+  const worktree = addWorktree(repo, "dry-teardown");
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() });
+
+  const preview = runEntry("src/index.mjs", ["--dry-run"], env);
+
+  assert.equal(preview.status, 0);
+  assert.ok(preview.stdout.includes(`would be skipped`), preview.stdout);
+  assert.ok(preview.stdout.includes(trustLineFor(repo)), preview.stdout);
+  assert.ok(preview.stdout.includes("node teardown.cjs"), preview.stdout);
 });
 
 test("a quoted argument in the command survives the shell", () => {
@@ -431,6 +519,7 @@ test("the report names the command that ran, not the template it came from", () 
     timeoutMs: 60000,
     configDir: configDir(repo),
     repoRoot: repo,
+    config: DEFAULTS,
     env: {},
     vars,
   });

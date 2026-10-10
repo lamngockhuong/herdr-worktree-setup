@@ -124,14 +124,27 @@ Off by default, and that is a judgment call worth explaining. A `.env` full of `
 
 ## Setup commands and trust
 
-`post_create` and `post_remove` run commands the *repository* chose. Cloning someone's project and opening a worktree must never be enough to execute them, so the machine's owner opts each repository in, from outside the repository:
+`post_create` and `post_remove` run commands the *repository* chose. Cloning someone's project and opening a worktree must never be enough to execute them, so the machine's owner opts each repository in, from outside the repository, for the exact commands it holds:
 
 ```bash
+herdr plugin action invoke lamngockhuong.worktree-setup.dry-run   # read the commands first
 herdr plugin config-dir lamngockhuong.worktree-setup
-# append the repository's absolute path to trusted-repos.txt in that directory
+# append the line the dry run printed to trusted-repos.txt in that directory
 ```
 
-One absolute path per line; `#` starts a comment. Until a repository appears there, both blocks are skipped and the log prints the exact line to add. One list covers both: a repository you trust to set a worktree up is trusted to tear it down again.
+Each line is the repository's absolute path followed by a hash of its two command blocks; `#` starts a comment:
+
+```text
+/home/you/projects/my-app sha256:3f9a…
+```
+
+You never compute the hash yourself. Until a matching line is there, both blocks are skipped, the toast says the commands were skipped, and the log and the dry run print the exact line to add. One line covers both blocks: a repository you trust to set a worktree up is trusted to tear it down again.
+
+The hash is what stops a branch from borrowing that trust. The commands are read from whatever the main checkout holds, so without it, checking out a pull request to review it would be enough for the next worktree to run whatever that branch put in `post_create`. Change either block, on any branch, and both are skipped again until you add the new line. Formatting, comments and every other key are not part of the hash, so editing `copy` or `notify` asks for nothing. Several lines may name the same repository, which suits switching between two branches whose commands differ.
+
+What the hash covers is the text of the commands, not the code they run. `pnpm install`, `make setup` or `./scripts/setup.sh` execute files from the repository, and `post_create` runs inside the new worktree, so trusting such a command means trusting that code on every branch you create a worktree for.
+
+**Upgrading from 0.3 or earlier:** a line holding only a path no longer grants trust. The first run after upgrading skips the commands and logs the line to replace it with.
 
 `HERDR_WORKTREE_SETUP_TRUST_ALL=1` disables the gate entirely. Set it only if every repository you open is one you wrote.
 
@@ -203,8 +216,8 @@ Four differences from `post_create` are worth knowing:
 
 - **The commands run in the repository, not in the worktree.** By the time the event fires the checkout is already deleted, so there is no directory left to run in and nothing there to read. Anything a teardown needs to find, it finds by name.
 - **`{{ branch }}` still works.** It comes from the event Herdr sends, not from a git command in a directory that no longer exists. `{{ worktree_path }}` and `{{ worktree_name }}` still name that directory, which is useful for a resource named after it and useless for reading a file out of it.
-- **Only a failure raises a toast.** You deleted the worktree and have moved on; a notification saying the cleanup went fine would interrupt for nothing, while one saying it did not is how you learn a container is still running. Either way the log has the full report.
-- **Trust is the same gate.** A repository listed in `trusted-repos.txt` gets both blocks; one that is not gets neither.
+- **Only a cleanup that did not happen raises a toast.** You deleted the worktree and have moved on; a notification saying the cleanup went fine would interrupt for nothing, while one saying it failed, or was skipped because the repository is not trusted for it, is how you learn a container is still running. Either way the log has the full report.
+- **Trust is the same gate.** A repository with a matching line in `trusted-repos.txt` gets both blocks; one without gets neither. Changing either block skips both until the new line is added.
 
 `post_remove_timeout_ms` bounds the whole block exactly as `post_create_timeout_ms` does, and defaults to the same ten minutes.
 
@@ -223,14 +236,16 @@ config .herdr-worktree.toml
 dry run: nothing is linked, copied, seeded or executed
 would link shared
 would copy apps/api/.env.local
+commands trusted (sha256:3f9a…)
 would run  docker compose -p 'demo'-'feature-checkout' up -d
+would run  docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v — on removal, shown unrendered
 
 press any key to close
 ```
 
 The pane is the point. Herdr captures the stdout of a plugin action into the command log and displays it nowhere, so a preview the action printed itself would be a preview nobody reads. The pane closes on the next key you press. When Herdr will not open one — another modal is already up — the action says so and falls back to printing the preview into the log, where `herdr plugin log list` finds it.
 
-Commands appear rendered and quoted exactly as they would reach the shell, which is the fastest way to see what a template resolves to. The copy, link and seed lines are the targets as they were resolved, not a promise that each one would succeed. A template that cannot be rendered is reported and exits non-zero.
+A line before the commands says whether they would run: the hash in force when the repository is trusted, or the reason they would be skipped and the exact line to add to `trusted-repos.txt`. `post_create` commands appear rendered and quoted exactly as they would reach the shell, which is the fastest way to see what a template resolves to. `post_remove` commands are listed as written, because the trust line approves them too and their variables are only filled in at removal. The copy, link and seed lines are the targets as they were resolved, not a promise that each one would succeed. A template that cannot be rendered is reported and exits non-zero.
 
 Outside Herdr, `node src/index.mjs --dry-run /path/to/worktree` does the same; with no path it uses the workspace Herdr has in focus, or the current directory.
 

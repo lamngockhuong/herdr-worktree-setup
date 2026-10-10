@@ -3,7 +3,7 @@
 
 import { pathToFileURL } from "node:url";
 import { copyEntry, exampleSeeds, seedFromExamples, symlinkEntry } from "./apply.mjs";
-import { runCommands, trustedForCommands, trustListPath } from "./commands.mjs";
+import { commandsVerdict, runCommands, untrustedDetail } from "./commands.mjs";
 import { CONFIG_FILENAME, loadConfig } from "./config.mjs";
 import { readContext, resolveTarget } from "./context.mjs";
 import { detectFiles } from "./detect.mjs";
@@ -40,31 +40,42 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env) {
     }
   }
 
-  if (
-    config.post_create.length > 0 &&
-    !trustedForCommands(repoRoot, env.HERDR_PLUGIN_CONFIG_DIR, env)
-  ) {
+  if (config.post_create.length > 0 || config.post_remove.length > 0) {
     // Said before the commands, so the lines below read as what they resolve
-    // to rather than as a promise that any of them would run. The trust file is
-    // named in full, because a preview that says a repository is untrusted and
-    // leaves the reader to find the file is a preview they have to follow up.
+    // to rather than as a promise that any of them would run. A skip carries
+    // the trust file in full and the line to add, because a preview that says
+    // a repository is untrusted and leaves the reader to find out how to fix it
+    // is a preview they have to follow up.
+    const configDir = env.HERDR_PLUGIN_CONFIG_DIR;
+    const { verdict, hash } = commandsVerdict(repoRoot, config, configDir, env);
     console.log(
-      `the commands below are shown rendered but would be skipped: ${repoRoot} ` +
-        `is not listed in ${trustListPath(env.HERDR_PLUGIN_CONFIG_DIR)}`,
+      verdict === "trusted"
+        ? `commands trusted (sha256:${hash})`
+        : "the commands below are shown rendered but would be skipped: " +
+            untrustedDetail(verdict, repoRoot, hash, configDir),
     );
   }
 
+  let failed = false;
   for (const command of config.post_create) {
     try {
       preview("run", render(command, vars));
     } catch (error) {
       // The real run stops the sequence at a render failure, so say so here too.
       preview("fail", command, error.message);
-      return 1;
+      failed = true;
+      break;
     }
   }
 
-  return 0;
+  // The trust line approves the teardown too, so the reader sees it here, even
+  // after a setup template failed. Unrendered: by the time it runs the
+  // variables may say something else.
+  for (const command of config.post_remove) {
+    preview("run", command, "on removal, shown unrendered");
+  }
+
+  return failed ? 1 : 0;
 }
 
 export function run(env = process.env, argv = []) {
@@ -111,6 +122,7 @@ export function run(env = process.env, argv = []) {
       timeoutMs: config.post_create_timeout_ms,
       configDir: env.HERDR_PLUGIN_CONFIG_DIR,
       repoRoot,
+      config,
       env,
       vars,
     }),

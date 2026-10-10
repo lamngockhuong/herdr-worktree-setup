@@ -36,6 +36,7 @@ export function run(env = process.env) {
     timeoutMs: config.post_remove_timeout_ms,
     configDir: env.HERDR_PLUGIN_CONFIG_DIR,
     repoRoot,
+    config,
     env,
     vars,
     action: "post_remove",
