@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { ConfigError, DEFAULTS, loadConfig, normalizeConfig } from "../src/config.mjs";
+import { parseToml } from "../src/toml.mjs";
 import { cleanup, makeRepo, write } from "./helpers.mjs";
 
 after(cleanup);
@@ -39,6 +40,20 @@ test("an unknown key names itself instead of being ignored", () => {
       return true;
     },
   );
+});
+
+test("a __proto__ section or key is reported like any other unknown key", () => {
+  for (const source of ["[__proto__]\nauto_detect = true", '__proto__ = ["a"]']) {
+    assert.throws(
+      () => normalizeConfig(parseToml(source)),
+      (error) => {
+        assert.ok(error instanceof ConfigError);
+        assert.match(error.message, /unknown key\(s\): __proto__\./);
+        return true;
+      },
+      `expected a throw for: ${source}`,
+    );
+  }
 });
 
 test("wrong value types are rejected", () => {

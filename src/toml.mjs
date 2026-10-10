@@ -131,6 +131,18 @@ function isIncomplete(text) {
   return scan(text).depth > 0;
 }
 
+// Plain assignment of `__proto__` replaces the prototype instead of adding a
+// key, so a `[__proto__]` table would vanish from every key check downstream.
+// Defining the property keeps it an ordinary own key that gets reported.
+function setKey(table, key, value) {
+  Object.defineProperty(table, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
 /**
  * Parse the supported TOML subset into a plain object. Section headers nest one
  * level: `[tool]` puts later keys under `result.tool`.
@@ -152,7 +164,7 @@ export function parseToml(source) {
       // Reopening a section would drop everything the first one held.
       if (Object.hasOwn(root, name)) throw new TomlError(`duplicate key: ${name}`, lineNo);
       table = {};
-      root[name] = table;
+      setKey(root, name, table);
       continue;
     }
 
@@ -170,7 +182,7 @@ export function parseToml(source) {
       rest += `\n${stripComment(lines[i]).trim()}`;
     }
 
-    table[key] = parseValue(rest, lineNo);
+    setKey(table, key, parseValue(rest, lineNo));
   }
 
   return root;

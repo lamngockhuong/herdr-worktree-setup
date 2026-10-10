@@ -46,6 +46,18 @@ test("nests one level of section headers", () => {
   assert.deepEqual(config.tool, { flag: false });
 });
 
+test("keeps __proto__ as an ordinary key rather than a prototype", () => {
+  const section = parseToml("[__proto__]\nx = 1");
+  assert.deepEqual(Object.keys(section), ["__proto__"]);
+  assert.equal(Object.getPrototypeOf(section), Object.prototype);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(section, "__proto__").value, { x: 1 });
+
+  const key = parseToml('__proto__ = ["a"]');
+  assert.deepEqual(Object.keys(key), ["__proto__"]);
+  assert.equal(Object.getPrototypeOf(key), Object.prototype);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(key, "__proto__").value, ["a"]);
+});
+
 test("treats an empty document as an empty table", () => {
   assert.deepEqual(parseToml("\n# only a comment\n"), {});
 });
