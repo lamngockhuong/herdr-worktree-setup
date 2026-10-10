@@ -112,7 +112,7 @@ notify = true
 | `post_remove_timeout_ms` | integer | `600000` |
 | `notify` | boolean | `true` |
 
-A misspelled key is an error, not a shrug: the plugin names it and lists the valid ones. `copy` and `symlink` entries must stay inside the repository — absolute paths and `..` are rejected.
+A misspelled key is an error, not a shrug: the plugin names it and lists the valid ones. `copy` and `symlink` entries must stay inside the repository — absolute paths and `..` are rejected. So is an entry that would leave the repository or the new worktree through a symlinked directory on the way: it is reported as `failed` and nothing is written. A link at the entry itself is fine and is reproduced as a link, so link `data` rather than listing `data/big` when `data` points elsewhere.
 
 The file reads a deliberately small slice of TOML: comments, `key = value`, and one level of `[section]` headers, where a value is a boolean, an integer, a string, or a list of those. Anything else fails loudly rather than parsing into silence.
 

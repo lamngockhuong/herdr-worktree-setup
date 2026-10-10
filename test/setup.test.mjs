@@ -102,6 +102,89 @@ test("one unwritable entry fails on its own without abandoning the rest", () => 
   assert.equal(read(worktree, "keep.local"), "KEPT=1");
 });
 
+// The config check rejects `..` and absolute paths, but a directory the branch
+// turned into a symlink spells an outside path with neither. Both directions
+// run with nobody trusting the repository, because copies need no trust.
+test("refuses to write through a symlinked directory in the worktree", () => {
+  const outside = makeRepo();
+  const repo = makeRepo({}, { gitignore: "dir/\n" });
+  write(repo, "dir/autostart/evil.desktop", "[Desktop Entry]");
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    'auto_detect = false\ncopy = ["dir/autostart/evil.desktop"]\nnotify = false',
+  );
+  const worktree = addWorktree(repo, "escape-write");
+  symlinkSync(outside, join(worktree, "dir"), "junction");
+
+  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() })), 1);
+  assert.equal(existsSync(join(outside, "autostart")), false);
+});
+
+test("refuses to copy through a symlinked directory in the main checkout", () => {
+  const outside = makeRepo({ id_test: "PRIVATE KEY" });
+  const repo = makeRepo({}, { gitignore: "keys\n" });
+  symlinkSync(outside, join(repo, "keys"), "junction");
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    'auto_detect = false\ncopy = ["keys/id_test"]\nnotify = false',
+  );
+  const worktree = addWorktree(repo, "escape-read");
+
+  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() })), 1);
+  assert.equal(existsSync(join(worktree, "keys")), false);
+});
+
+// A link to a directory that does not exist yet resolves nowhere, so it cannot
+// be vouched for: creating the parent would create the outside directory.
+test("refuses to write through a dangling symlinked directory in the worktree", () => {
+  const outside = makeRepo();
+  const repo = makeRepo({}, { gitignore: "dir/\n" });
+  write(repo, "dir/evil.desktop", "[Desktop Entry]");
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    'auto_detect = false\ncopy = ["dir/evil.desktop"]\nnotify = false',
+  );
+  const worktree = addWorktree(repo, "escape-dangling");
+  symlinkSync(join(outside, "missing"), join(worktree, "dir"), "junction");
+
+  // The refusal, not some other error: `mkdirSync` happens to fail here too.
+  const child = runEntry(
+    "src/index.mjs",
+    [],
+    pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() }),
+  );
+  assert.equal(child.status, 1);
+  assert.match(child.stdout, /refused: the target path leaves/);
+  assert.equal(existsSync(join(outside, "missing")), false);
+});
+
+test("refuses to link through a symlinked directory in the worktree", () => {
+  const outside = makeRepo();
+  const repo = makeRepo({}, { gitignore: "dir/\n" });
+  write(repo, "dir/autostart/entry", "x");
+  write(repo, ".herdr-worktree.toml", 'symlink = ["dir/autostart"]\nnotify = false');
+  const worktree = addWorktree(repo, "escape-link");
+  symlinkSync(outside, join(worktree, "dir"), "junction");
+
+  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() })), 1);
+  assert.equal(existsSync(join(outside, "autostart")), false);
+});
+
+// Only directories on the way are checked. A config file that is itself a link
+// to somewhere outside is the user's own setup, and it is reproduced as a link.
+test("still reproduces a config file that links outside the repository", () => {
+  const outside = makeRepo({ "project.env": "SECRET=1" });
+  const repo = makeRepo({}, { gitignore: ".env\n" });
+  symlinkSync(join(outside, "project.env"), join(repo, ".env"));
+  const worktree = addWorktree(repo, "outside-file-link");
+
+  assert.equal(run(pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir() })), 0);
+  assert.equal(lstatSync(join(worktree, ".env")).isSymbolicLink(), true);
+});
+
 test("seeds a missing file from its committed example only when asked", () => {
   const files = { "apps/api/.env.local.example": "API_KEY=replace-me" };
   const repo = makeRepo(files, { gitignore: ".env.local\n" });
@@ -181,8 +264,10 @@ test("fails loudly when Herdr passes no worktree at all", () => {
 
 // `write-arg.cjs` records the single argument it is given, so a test can prove
 // the branch name arrived as one literal argument instead of being re-parsed by
-// the shell. Every branch below is a name `git check-ref-format` accepts.
-for (const branch of ["a;b", "a`b", "feat/50%", "a!b"]) {
+// the shell. Every branch below is a name `git check-ref-format` accepts. The
+// typographic quotes are single quotes to PowerShell, so on Windows they would
+// close the quoting early and run what follows.
+for (const branch of ["a;b", "a`b", "feat/50%", "a!b", "x’;exit(7);’", "a‘b‚c‛d"]) {
   test(`a branch named ${branch} reaches the command verbatim`, () => {
     const repo = repoRunningCommand("post_create", "node write-arg.cjs {{ branch }}");
     const worktree = addWorktree(repo, branch);
