@@ -11,7 +11,38 @@ const results = [
 ];
 
 test("counts finished work and ignores skips", () => {
-  assert.deepEqual(summarize(results), { done: { copy: 2, symlink: 1 }, failed: 1 });
+  assert.deepEqual(summarize(results), {
+    done: { copy: 2, symlink: 1 },
+    failed: 1,
+    untrusted: 0,
+  });
+});
+
+// A command block is only ever skipped by the trust gate: an existing file is
+// skipped too, but that is the plugin doing its job, not a block that did not run.
+const untrusted = [
+  { action: "copy", path: "a/.env", status: "done" },
+  { action: "post_create", path: "/repo", status: "skipped", detail: "not trusted" },
+];
+
+test("counts a command block the trust gate skipped, apart from skipped files", () => {
+  assert.deepEqual(summarize(untrusted), { done: { copy: 1 }, failed: 0, untrusted: 1 });
+  assert.equal(summaryLine(summarize(untrusted)), "copied 1 file, commands skipped: not trusted");
+});
+
+test("a setup whose commands were skipped does not call itself ready", () => {
+  assert.deepEqual(setupToast(summarize(untrusted), "x", "feature/checkout"), {
+    title: "Worktree ready, commands skipped",
+    body: "feature/checkout: x",
+  });
+});
+
+test("a teardown the trust gate skipped is worth a toast, since nothing was cleaned up", () => {
+  const skipped = summarize([{ action: "post_remove", path: "/repo", status: "skipped" }]);
+  assert.deepEqual(cleanupToast(skipped, "x", "feature/checkout"), {
+    title: "Worktree cleanup skipped",
+    body: "feature/checkout: x",
+  });
 });
 
 test("writes a summary a human can read at a glance", () => {
@@ -43,7 +74,7 @@ test("a detached worktree has no branch to put in front of the summary", () => {
   assert.equal(setupToast(summarize([]), "nothing to do", null).body, "nothing to do");
 });
 
-test("only a failed teardown is worth interrupting someone who has moved on", () => {
+test("a teardown that went fine is not worth interrupting someone who has moved on", () => {
   const ok = summarize([{ action: "post_remove", path: "docker compose down", status: "done" }]);
   assert.equal(cleanupToast(ok, "ran 1 command", "feature/checkout"), null);
 

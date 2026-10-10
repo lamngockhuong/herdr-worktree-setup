@@ -162,4 +162,4 @@ Bản xem trước hiện từng câu lệnh đúng như shell sẽ nhận, kể
 herdr plugin log list --plugin lamngockhuong.worktree-setup --limit 20
 ```
 
-Nếu cả khối `post_create` bị bỏ qua, nghĩa là repository chưa được tin cậy; log in ra đúng dòng cần thêm. Xem [Lệnh cài đặt và quyền tin cậy](../README.vi.md#lệnh-cài-đặt-và-quyền-tin-cậy).
+Nếu cả khối `post_create` bị bỏ qua, nghĩa là repository chưa được tin cậy, hoặc lệnh của nó đã đổi kể từ lúc được tin cậy; log in ra lý do và đúng dòng cần thêm. Xem [Lệnh cài đặt và quyền tin cậy](../README.vi.md#lệnh-cài-đặt-và-quyền-tin-cậy).

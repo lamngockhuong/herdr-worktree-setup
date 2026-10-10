@@ -162,4 +162,4 @@ The preview renders each command exactly as the shell will receive it, quoting i
 herdr plugin log list --plugin lamngockhuong.worktree-setup --limit 20
 ```
 
-If a `post_create` block was skipped entirely, the repository is not trusted yet; the log prints the exact line to add. See [Setup commands and trust](../README.md#setup-commands-and-trust).
+If a `post_create` block was skipped entirely, the repository is not trusted yet, or its commands changed since it was; the log prints the reason and the exact line to add. See [Setup commands and trust](../README.md#setup-commands-and-trust).

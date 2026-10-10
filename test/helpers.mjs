@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { TRUST_FILENAME } from "../src/commands.mjs";
+import { commandsHash, TRUST_FILENAME, trustLine } from "../src/commands.mjs";
+import { loadConfig } from "../src/config.mjs";
 
 const created = [];
 
@@ -62,15 +63,19 @@ export function addWorktree(repoRoot, branch = "feature") {
   return target;
 }
 
+/** The trust line for a repository's commands as its config holds them now. */
+export const trustLineFor = (repo) => trustLine(repo, commandsHash(loadConfig(repo)));
+
 /**
  * A plugin config directory, holding a trust list naming `trustedRepo` when one
- * is given. Registered for cleanup like every other fixture, which an inline
- * `mkdtempSync` in a test file is not.
+ * is given, trusted with the commands its config holds right now: a test that
+ * edits them afterwards is testing the refusal. Registered for cleanup like
+ * every other fixture, which an inline `mkdtempSync` in a test file is not.
  */
 export function configDir(trustedRepo) {
   const dir = mkdtempSync(join(tmpdir(), "herdr-wt-cfg-"));
   created.push(dir);
-  if (trustedRepo) write(dir, TRUST_FILENAME, `# trusted\n${trustedRepo}\n`);
+  if (trustedRepo) write(dir, TRUST_FILENAME, `# trusted\n${trustLineFor(trustedRepo)}\n`);
   return dir;
 }
 

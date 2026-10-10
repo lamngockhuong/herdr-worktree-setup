@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { result } from "./report.mjs";
@@ -11,8 +12,7 @@ export const TRUST_FILENAME = "trusted-repos.txt";
  * that says it would are quoting a file the reader now has to edit, so both
  * name it the same way rather than one of them naming it by filename alone.
  */
-export const trustListPath = (configDir) =>
-  join(configDir ?? "<plugin config dir>", TRUST_FILENAME);
+const trustListPath = (configDir) => join(configDir ?? "<plugin config dir>", TRUST_FILENAME);
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -21,13 +21,46 @@ const IS_WINDOWS = process.platform === "win32";
 // execute them, so the machine's owner opts each repository in by hand,
 // outside the repository. One list covers both: a repository trusted to set a
 // worktree up is trusted to tear it down again.
+//
+// A line names the repository and the commands it was trusted with, as
+// `<path> sha256:<hex>`. The path alone is not enough: the commands are read
+// from whatever the main checkout holds, so a branch checked out for review
+// could otherwise swap them for its own and inherit the trust.
+
+/**
+ * The fingerprint a trust line carries. Taken from the parsed config, so how
+ * the TOML is written does not matter, and before rendering, since the
+ * rendered commands name the worktree and would never match twice. Only the
+ * two blocks that run commands are covered: changing `copy` or `notify` should
+ * not demand trusting the repository again.
+ */
+export function commandsHash({ post_create, post_remove }) {
+  return createHash("sha256").update(JSON.stringify({ post_create, post_remove })).digest("hex");
+}
+
+/** The line that trusts `repoRoot` with the commands hashed as `hash`. */
+export const trustLine = (repoRoot, hash) => `${repoRoot} sha256:${hash}`;
+
+const HASH_TOKEN = /^sha256:([0-9a-f]{64})$/i;
+
+// Split at the last whitespace, so a path holding spaces survives. A line with
+// no well-formed hash is kept as a path alone: it grants nothing, but it lets
+// the skip message say the line is in the old format rather than missing.
+function parseTrustLine(line) {
+  const split = line.search(/\s\S+$/);
+  const match = split === -1 ? null : HASH_TOKEN.exec(line.slice(split + 1));
+  if (!match) return { path: line, hash: null };
+  return { path: line.slice(0, split).trim(), hash: match[1].toLowerCase() };
+}
+
 export function readTrustList(configDir) {
   if (!configDir) return [];
   try {
     return readFileSync(trustListPath(configDir), "utf8")
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => line !== "" && !line.startsWith("#"));
+      .filter((line) => line !== "" && !line.startsWith("#"))
+      .map(parseTrustLine);
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -47,19 +80,51 @@ function canonical(path) {
   return IS_WINDOWS ? resolved.replaceAll("\\", "/").toLowerCase() : resolved;
 }
 
-export function isTrusted(repoRoot, trusted, env = process.env) {
-  if (env.HERDR_WORKTREE_SETUP_TRUST_ALL === "1") return true;
+/**
+ * Whether a repository may run commands with this hash, and if not, why:
+ * `unlisted` when no line names it, `legacy` when only a path-only line does,
+ * `changed` when a hashed line does but for other commands. Several lines may
+ * name one repository, and any match is enough.
+ */
+export function trustVerdict(repoRoot, hash, entries, env = process.env) {
+  if (env.HERDR_WORKTREE_SETUP_TRUST_ALL === "1") return "trusted";
   const target = canonical(repoRoot);
-  return trusted.some((entry) => canonical(entry) === target);
+  const mine = entries.filter((entry) => canonical(entry.path) === target);
+  if (mine.some((entry) => entry.hash === hash)) return "trusted";
+  if (mine.some((entry) => entry.hash !== null)) return "changed";
+  return mine.length > 0 ? "legacy" : "unlisted";
 }
 
 /**
  * The gate both command blocks pass through, wiring included. `--dry-run` has
  * to reach the same verdict as a real run, so both ask this rather than each
- * assembling the trust list and the environment for itself.
+ * assembling the hash, the trust list and the environment for itself. The
+ * hash comes back too, for the line a skip has to print.
  */
-export function trustedForCommands(repoRoot, configDir, env = process.env) {
-  return isTrusted(repoRoot, readTrustList(configDir), env);
+export function commandsVerdict(repoRoot, config, configDir, env = process.env) {
+  const hash = commandsHash(config);
+  return { verdict: trustVerdict(repoRoot, hash, readTrustList(configDir), env), hash };
+}
+
+/**
+ * Why a repository's commands are skipped, ending in the exact line that would
+ * allow them. Every reason sends the reader to the dry run first: the line
+ * approves whatever the commands are now, so it should not be pasted unread.
+ */
+export function untrustedDetail(verdict, repoRoot, hash, configDir) {
+  const file = trustListPath(configDir);
+  const line = trustLine(repoRoot, hash);
+  if (verdict === "legacy") {
+    return (
+      `${file} lists this repository without a hash, which no longer grants trust. ` +
+      `Read the commands with the dry-run action, then replace that line with: ${line}`
+    );
+  }
+  const why =
+    verdict === "changed"
+      ? "post_create or post_remove changed since this repository was trusted"
+      : "repository is not trusted for commands";
+  return `${why}. Read them with the dry-run action, then add this line to ${file}: ${line}`;
 }
 
 /**
@@ -118,14 +183,13 @@ function failureDetail(run, timeoutMs) {
 export function runCommands(
   cwd,
   commands,
-  { timeoutMs, configDir, repoRoot, env, vars = {}, action },
+  { timeoutMs, configDir, repoRoot, config, env, vars = {}, action },
 ) {
   if (commands.length === 0) return [];
 
-  if (!trustedForCommands(repoRoot, configDir, env)) {
-    const detail =
-      `repository is not trusted for commands. To allow it, add this line to ` +
-      `${trustListPath(configDir)}: ${repoRoot}`;
+  const { verdict, hash } = commandsVerdict(repoRoot, config, configDir, env);
+  if (verdict !== "trusted") {
+    const detail = untrustedDetail(verdict, repoRoot, hash, configDir);
     return [result(action, repoRoot, "skipped", detail)];
   }
 
