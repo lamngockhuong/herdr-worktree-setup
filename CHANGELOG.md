@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.3.1...v0.3.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* keep copies and links inside the checkout, and quote typographic quotes for PowerShell ([#21](https://github.com/lamngockhuong/herdr-worktree-setup/issues/21)) ([15e3ede](https://github.com/lamngockhuong/herdr-worktree-setup/commit/15e3ede703a3e5d93a84c53d69cbb01688ac3f15))
+
 ## [0.3.1](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.3.0...v0.3.1) (2026-09-17)
 
 
