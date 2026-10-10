@@ -57,14 +57,21 @@ function isWithin(path, root) {
 }
 
 /**
- * Why `path` would leave `root` through a symlinked directory, or undefined
- * when it stays inside. The config check only sees the spelling, and a
- * directory turned into a link escapes without a `..` in it. The last component
- * is left alone: a link there is reproduced as a link, never read through.
+ * Why `path` cannot be placed safely: it leaves `root` through a symlinked
+ * directory, or goes through one whose destination cannot be checked yet.
+ * Undefined when it provably stays inside. The config check only sees the
+ * spelling, and a directory turned into a link escapes without a `..` in it.
+ * The last component is left alone: a link there is reproduced as a link,
+ * never read through.
  */
 function escapesThroughLink(path, root, side) {
   const real = realAncestor(dirname(path));
-  if (real !== undefined && isWithin(real, realpathSync(root))) return undefined;
+  // A dangling link may well point inside; it is refused because nothing can
+  // tell yet, so the message must not claim it leaves.
+  if (real === undefined) {
+    return `refused: the ${side} path goes through a symlink whose destination does not exist yet, so it cannot be checked against ${root}`;
+  }
+  if (isWithin(real, realpathSync(root))) return undefined;
   return `refused: the ${side} path leaves ${root} through a symlinked directory`;
 }
 
