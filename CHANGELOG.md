@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.3.2...v0.4.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* bind repository trust to the commands it runs ([#24](https://github.com/lamngockhuong/herdr-worktree-setup/issues/24))
+
+### Bug Fixes
+
+* bind repository trust to the commands it runs ([#24](https://github.com/lamngockhuong/herdr-worktree-setup/issues/24)) ([933cc17](https://github.com/lamngockhuong/herdr-worktree-setup/commit/933cc17ef4cb30e190e6eb2cc4f3369c760d28d9))
+* report __proto__ as an unknown key and correct the dangling-link refusal ([#26](https://github.com/lamngockhuong/herdr-worktree-setup/issues/26)) ([e372b0a](https://github.com/lamngockhuong/herdr-worktree-setup/commit/e372b0a4cdda1f19d0cf5a9a8c6f9a06d0806f0a))
+
 ## [0.3.2](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.3.1...v0.3.2) (2026-10-10)
 
 
