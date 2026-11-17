@@ -20,8 +20,18 @@ function collectCopyTargets(repoRoot, config) {
   return [...new Set([...detected, ...config.copy])];
 }
 
+// C0 controls, DEL and C1 controls: everything a terminal may act on instead of
+// drawing. The preview is what trust is granted from, so a command must not be
+// able to erase or overwrite its own line and show the reader something else.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/** `text` with every control character spelled out as a visible `\xNN`. */
+export const visible = (text) =>
+  text.replace(CONTROL, (char) => `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`);
+
 const preview = (verb, path, detail) =>
-  console.log(`would ${verb.padEnd(4)} ${path}${detail ? ` — ${detail}` : ""}`);
+  console.log(visible(`would ${verb.padEnd(4)} ${path}${detail ? ` — ${detail}` : ""}`));
 
 /**
  * Print the run instead of performing it. Commands appear rendered and escaped

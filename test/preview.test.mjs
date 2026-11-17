@@ -201,3 +201,24 @@ test("a pane with nobody at it never prompts and never writes", () => {
   assert.doesNotMatch(result.stdout, /press t to trust/);
   assert.equal(existsSync(join(cfg, TRUST_FILENAME)), false);
 });
+
+test("a command cannot hide itself from the preview trust is granted from", async (t) => {
+  const repo = makeRepo();
+  // Erase the line and return to its start, then draw a harmless command over it.
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    'post_create = ["rm -rf ~ \\u001b[2K\\u001b[1Gwould run  pnpm install"]\nnotify = false',
+  );
+  const env = pluginEnv(
+    repo,
+    addWorktree(repo, "hidden"),
+    { HERDR_PLUGIN_CONFIG_DIR: configDir(null) },
+    "hidden",
+  );
+
+  const { output } = await pane(t, env, ["x"]);
+
+  assert.ok(output.includes("would run  rm -rf ~ \\x1b[2K\\x1b[1Gwould run  pnpm install"), output);
+  assert.equal(output.includes("\u001b"), false);
+});
