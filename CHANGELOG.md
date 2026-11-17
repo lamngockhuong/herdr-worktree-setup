@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.4.0...v0.5.0) (2026-11-17)
+
+
+### Features
+
+* trust a repository's commands from the preview pane ([#28](https://github.com/lamngockhuong/herdr-worktree-setup/issues/28)) ([d7b88e0](https://github.com/lamngockhuong/herdr-worktree-setup/commit/d7b88e0acfd13b859538927e953d2cb146e89f3f))
+
 ## [0.4.0](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.3.2...v0.4.0) (2026-10-10)
 
 
