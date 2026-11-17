@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { ENTRYPOINT_ID, PLUGIN_ID, paneFailure } from "../src/preview.mjs";
-import { addWorktree, cleanup, makeRepo, pluginEnv, runEntry, write } from "./helpers.mjs";
+import { readTrustList, TRUST_FILENAME } from "../src/commands.mjs";
+import { ENTRYPOINT_ID, main, PLUGIN_ID, paneFailure } from "../src/preview.mjs";
+import {
+  addWorktree,
+  cleanup,
+  configDir,
+  makeRepo,
+  pluginEnv,
+  repoRunningCommand,
+  runEntry,
+  trustLineFor,
+  write,
+} from "./helpers.mjs";
 
 after(cleanup);
 
@@ -56,4 +67,158 @@ test("the pane it opens is the one the manifest declares", () => {
   assert.match(manifest, new RegExp(`^\\[\\[panes\\]\\]\\nid = "${ENTRYPOINT_ID}"$`, "m"));
   assert.match(manifest, /^command = \["node", "src\/preview\.mjs", "--pane"\]$/m);
   assert.match(manifest, /^command = \["node", "src\/preview\.mjs"\]$/m);
+});
+
+/**
+ * Run the pane in-process as if a person sat at it, pressing `keys` in order.
+ * Before each key it calls `beforeKey` with the index, so a test can change
+ * the world between the preview being drawn and the key being pressed.
+ */
+async function pane(t, env, keys, beforeKey = () => {}) {
+  const lines = [];
+  t.mock.method(console, "log", (...args) => lines.push(args.join(" ")));
+  t.mock.method(console, "error", (...args) => lines.push(args.join(" ")));
+
+  let pressed = 0;
+  const readKey = async () => {
+    assert.ok(pressed < keys.length, `the pane asked for key ${pressed + 1}:\n${lines.join("\n")}`);
+    beforeKey(pressed);
+    return keys[pressed++];
+  };
+
+  const code = await main(env, ["--pane"], { interactive: true, readKey });
+  t.mock.restoreAll();
+  return { code, output: lines.join("\n"), pressed };
+}
+
+function untrustedRepo() {
+  const repo = repoRunningCommand("post_create", "node write-arg.cjs");
+  const worktree = addWorktree(repo, "trust-me");
+  const cfg = configDir(null);
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: cfg }, "trust-me");
+  return { repo, cfg, env };
+}
+
+test("pressing t in the pane trusts the commands it showed", async (t) => {
+  const { repo, cfg, env } = untrustedRepo();
+
+  const { code, output, pressed } = await pane(t, env, ["t", "x"]);
+
+  assert.equal(code, 0);
+  assert.equal(pressed, 2, "the pane must stay open after trusting, to show what it wrote");
+  assert.match(output, /press t to trust these commands/);
+  assert.match(output, /trusted: added /);
+  assert.equal(readFileSync(join(cfg, TRUST_FILENAME), "utf8"), `${trustLineFor(repo)}\n`);
+});
+
+test("any other key closes the pane and trusts nothing", async (t) => {
+  const { cfg, env } = untrustedRepo();
+
+  for (const key of ["x", "\u0003", "\u001b", "tt"]) {
+    const { pressed } = await pane(t, env, [key]);
+    assert.equal(pressed, 1, JSON.stringify(key));
+  }
+  assert.equal(existsSync(join(cfg, TRUST_FILENAME)), false);
+});
+
+test("commands changed after the preview was drawn are not trusted", async (t) => {
+  const { repo, cfg, env } = untrustedRepo();
+
+  const { output } = await pane(t, env, ["t", "x"], (index) => {
+    if (index === 0) write(repo, ".herdr-worktree.toml", 'post_create = ["echo swapped"]');
+  });
+
+  assert.match(output, /not trusted: post_create or post_remove changed after this preview/);
+  assert.equal(existsSync(join(cfg, TRUST_FILENAME)), false);
+});
+
+test("a config broken before the key press trusts nothing and still closes", async (t) => {
+  const { repo, cfg, env } = untrustedRepo();
+
+  const { output, pressed } = await pane(t, env, ["t", "x"], (index) => {
+    if (index === 0) write(repo, ".herdr-worktree.toml", "no_such_key = 1");
+  });
+
+  assert.equal(pressed, 2);
+  assert.match(output, /not trusted: /);
+  assert.equal(existsSync(join(cfg, TRUST_FILENAME)), false);
+});
+
+test("a trust list without a final newline keeps its last line intact", async (t) => {
+  const { repo, cfg, env } = untrustedRepo();
+  write(cfg, TRUST_FILENAME, "# mine\n/elsewhere");
+
+  await pane(t, env, ["t", "x"]);
+
+  const entries = readTrustList(cfg);
+  assert.deepEqual(
+    entries.map((entry) => entry.path),
+    ["/elsewhere", repo],
+  );
+});
+
+test("a trusted repository, or one with no commands, is not offered trust", async (t) => {
+  const trusted = repoRunningCommand("post_create", "node write-arg.cjs");
+  const trustedEnv = pluginEnv(
+    trusted,
+    addWorktree(trusted, "trusted"),
+    { HERDR_PLUGIN_CONFIG_DIR: configDir(trusted) },
+    "trusted",
+  );
+
+  const plain = makeRepo();
+  const plainEnv = pluginEnv(
+    plain,
+    addWorktree(plain, "plain"),
+    { HERDR_PLUGIN_CONFIG_DIR: configDir(null) },
+    "plain",
+  );
+
+  for (const env of [trustedEnv, plainEnv]) {
+    const { output, pressed } = await pane(t, env, ["t"]);
+    assert.equal(pressed, 1);
+    assert.doesNotMatch(output, /press t to trust/);
+    assert.match(output, /press any key to close/);
+  }
+});
+
+test("without a config directory the pane cannot write trust and does not offer it", async (t) => {
+  const repo = repoRunningCommand("post_create", "node write-arg.cjs");
+  const env = pluginEnv(repo, addWorktree(repo, "no-cfg"), {}, "no-cfg");
+  // The developer running the suite may have Herdr's variable set themselves.
+  env.HERDR_PLUGIN_CONFIG_DIR = "";
+
+  const { output } = await pane(t, env, ["t"]);
+  assert.doesNotMatch(output, /press t to trust/);
+});
+
+test("a pane with nobody at it never prompts and never writes", () => {
+  const { cfg, env } = untrustedRepo();
+
+  const result = runEntry("src/preview.mjs", ["--pane"], env);
+
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.stdout, /press t to trust/);
+  assert.equal(existsSync(join(cfg, TRUST_FILENAME)), false);
+});
+
+test("a command cannot hide itself from the preview trust is granted from", async (t) => {
+  const repo = makeRepo();
+  // Erase the line and return to its start, then draw a harmless command over it.
+  write(
+    repo,
+    ".herdr-worktree.toml",
+    'post_create = ["rm -rf ~ \\u001b[2K\\u001b[1Gwould run  pnpm install"]\nnotify = false',
+  );
+  const env = pluginEnv(
+    repo,
+    addWorktree(repo, "hidden"),
+    { HERDR_PLUGIN_CONFIG_DIR: configDir(null) },
+    "hidden",
+  );
+
+  const { output } = await pane(t, env, ["x"]);
+
+  assert.ok(output.includes("would run  rm -rf ~ \\x1b[2K\\x1b[1Gwould run  pnpm install"), output);
+  assert.equal(output.includes("\u001b"), false);
 });

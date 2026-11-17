@@ -5,6 +5,8 @@
 // is a preview nobody reads.
 
 import { pathToFileURL } from "node:url";
+import { addTrustLine, commandsVerdict, trustLine } from "./commands.mjs";
+import { loadConfig } from "./config.mjs";
 import { herdrCli } from "./herdr.mjs";
 import { runCli } from "./index.mjs";
 
@@ -49,28 +51,77 @@ function openPane(env) {
 }
 
 /**
- * Hold the pane open. A pane closes when its command exits, and a preview that
- * disappears in the frame it was drawn is the problem this file exists to fix.
- * Outside a terminal there is nobody to press the key, so it returns at once.
+ * Read one key in raw mode. The pane closes when its command exits, and a
+ * preview that disappears in the frame it was drawn is the problem this file
+ * exists to fix, so every path through the pane ends here.
  */
-async function waitForKey() {
+async function readKeyFromStdin() {
   const { stdin } = process;
-  if (!stdin.isTTY) return;
-
-  console.log("\npress any key to close");
   stdin.setRawMode(true);
   stdin.resume();
 
-  await new Promise((resolve) => stdin.once("data", resolve));
+  const key = await new Promise((resolve) => stdin.once("data", resolve));
 
   stdin.setRawMode(false);
   stdin.pause();
+  return key.toString();
 }
 
-export async function main(env = process.env, argv = []) {
+/** The key that grants trust. Anything else, Ctrl+C and Escape included, closes. */
+const TRUST_KEY = /^t$/i;
+
+/**
+ * Grant the trust the preview offered, for the commands it showed and no
+ * others. The config is read again first: had a checkout or an edit changed
+ * the commands since the preview was drawn, the hash on screen would no longer
+ * describe them, and trusting the new ones would be trusting them unread.
+ */
+export function grantTrust(offer, env = process.env) {
+  const now = commandsVerdict(offer.repoRoot, loadConfig(offer.repoRoot), offer.configDir, env);
+
+  if (now.hash !== offer.hash) {
+    return "not trusted: post_create or post_remove changed after this preview was drawn. Open the preview again to read them";
+  }
+  if (now.verdict === "trusted") return "already trusted, nothing written";
+
+  const file = addTrustLine(offer.configDir, offer.repoRoot, offer.hash);
+  return `trusted: added ${trustLine(offer.repoRoot, offer.hash)} to ${file}`;
+}
+
+/**
+ * Hold the pane open, offering trust when the preview found commands the
+ * repository is not trusted for. Outside a terminal there is nobody to press a
+ * key, so it returns at once and never writes anything.
+ */
+export async function closePane(offer, env, { interactive, readKey }) {
+  if (!interactive) return;
+
+  // Without a config directory there is no list to write to: the pane is not
+  // running under Herdr, and the printed line is the only way left.
+  if (offer && offer.verdict !== "trusted" && offer.configDir) {
+    console.log("\npress t to trust these commands for this repository, any other key to close");
+    if (!TRUST_KEY.test(await readKey())) return;
+
+    try {
+      console.log(grantTrust(offer, env));
+    } catch (error) {
+      // A config broken between drawing and the key press, or a list that
+      // cannot be written: nothing was trusted, and the pane must still close.
+      console.log(`not trusted: ${error.message}`);
+    }
+  }
+
+  console.log("\npress any key to close");
+  await readKey();
+}
+
+export async function main(env = process.env, argv = [], io = {}) {
+  const { interactive = Boolean(process.stdin.isTTY), readKey = readKeyFromStdin } = io;
+
   if (argv.includes("--pane")) {
-    const code = runCli(env, ["--dry-run"]);
-    await waitForKey();
+    const seen = {};
+    const code = runCli(env, ["--dry-run"], seen);
+    await closePane(seen.trust, env, { interactive, readKey });
     return code;
   }
 
@@ -79,6 +130,7 @@ export async function main(env = process.env, argv = []) {
 
   // No pane to read, so fall back to the plugin log: printing here is what this
   // action did before, and the reason it had to belongs next to the output.
+  // Nobody can answer a prompt in the log, so trust is never offered there.
   console.error(`could not open the preview pane: ${failure}`);
   return runCli(env, ["--dry-run"]);
 }

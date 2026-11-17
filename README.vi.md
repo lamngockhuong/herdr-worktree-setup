@@ -127,10 +127,29 @@ Mặc định tắt, và đây là một lựa chọn đáng giải thích. Mộ
 `post_create` và `post_remove` chạy những lệnh do *repository* chọn. Chỉ clone dự án của người khác rồi mở một worktree thì không bao giờ được phép đủ để các lệnh đó chạy, nên chủ máy phải tự cho phép từng repository, từ bên ngoài repository, với đúng những lệnh nó đang có:
 
 ```bash
-herdr plugin action invoke lamngockhuong.worktree-setup.dry-run   # đọc các lệnh trước
-herdr plugin config-dir lamngockhuong.worktree-setup
-# thêm dòng mà dry run in ra vào trusted-repos.txt trong thư mục đó
+herdr plugin action invoke lamngockhuong.worktree-setup.dry-run
 ```
+
+Pane xem trước liệt kê các lệnh. Nếu repository chưa được tin cậy với những lệnh đó, pane kết thúc bằng dòng:
+
+```
+press t to trust these commands for this repository, any other key to close
+```
+
+Bấm `t` thì pane ghi dòng tin cậy cho đúng những lệnh đang hiện trên màn hình, rồi cho biết đã ghi vào đâu. Bấm phím khác, kể cả Escape và Ctrl+C, thì pane đóng lại và không ghi gì. Nếu cấu hình bị sửa trong khoảng từ lúc bản xem trước hiện ra đến lúc bấm phím, pane cũng không ghi gì và yêu cầu bạn mở lại bản xem trước: chỉ những lệnh bạn đã đọc mới được tin cậy.
+
+Muốn mở bản xem trước bằng một phím, hãy gán action đó trong cấu hình của chính Herdr:
+
+```toml
+# ~/.config/herdr/config.toml — cấu hình của Herdr, không phải của plugin này
+[[keys.command]]
+key = "prefix+w"
+type = "plugin_action"
+command = "lamngockhuong.worktree-setup.dry-run"
+description = "preview and trust worktree setup"
+```
+
+Thông báo của Herdr khi một khối lệnh bị bỏ qua cũng chỉ về chỗ này. Bạn vẫn có thể tự sửa danh sách: `herdr plugin config-dir lamngockhuong.worktree-setup` in ra thư mục chứa `trusted-repos.txt`, còn dry run in ra đúng dòng cần thêm.
 
 Mỗi dòng gồm đường dẫn tuyệt đối của repository và một mã hash của hai khối lệnh; dấu `#` mở đầu phần chú thích:
 
@@ -138,7 +157,7 @@ Mỗi dòng gồm đường dẫn tuyệt đối của repository và một mã 
 /home/you/projects/my-app sha256:3f9a…
 ```
 
-Bạn không bao giờ phải tự tính hash. Chừng nào chưa có dòng khớp, cả hai khối đều bị bỏ qua, thông báo của Herdr nói rõ các lệnh đã bị bỏ qua, còn log và dry run in ra đúng dòng cần thêm. Một dòng dùng chung cho cả hai khối: repository đã được tin cậy để dựng worktree lên thì cũng được tin cậy để dọn nó đi.
+Bạn không bao giờ phải tự tính hash. Chừng nào chưa có dòng khớp, cả hai khối đều bị bỏ qua, thông báo của Herdr nói rõ các lệnh đã bị bỏ qua và chỗ để tin cậy chúng, còn log và dry run in ra đúng dòng cần thêm. Một dòng dùng chung cho cả hai khối: repository đã được tin cậy để dựng worktree lên thì cũng được tin cậy để dọn nó đi.
 
 Mã hash ngăn một nhánh mượn quyền tin cậy đó. Lệnh được đọc từ nội dung đang có trong main checkout, nên nếu chỉ có đường dẫn, bạn checkout một pull request để xem xét là đủ để worktree kế tiếp chạy bất cứ thứ gì nhánh đó đặt vào `post_create`. Đổi một trong hai khối, trên nhánh nào cũng vậy, thì cả hai lại bị bỏ qua cho đến khi bạn thêm dòng mới. Cách trình bày, chú thích và mọi khoá khác không nằm trong hash, nên sửa `copy` hay `notify` không bắt bạn làm gì. Nhiều dòng có thể cùng chỉ một repository, tiện khi bạn chuyển qua lại giữa hai nhánh có lệnh khác nhau.
 
@@ -243,7 +262,9 @@ would run  docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v —
 press any key to close
 ```
 
-Cái pane mới là điểm mấu chốt. Herdr gom stdout của một plugin action vào log lệnh và không hiển thị nó ở đâu cả, nên một bản xem trước do chính action in ra là bản xem trước không ai đọc. Pane đóng lại ngay khi bạn bấm phím tiếp theo. Khi Herdr từ chối mở pane — vì đang có một modal khác — action sẽ nói rõ lý do rồi quay về in bản xem trước vào log, nơi `herdr plugin log list` đọc được.
+Khi repository chưa được tin cậy với các lệnh đang hiện, dòng cuối sẽ mời bấm `t` để tin cậy chúng, như mục [Lệnh cài đặt và quyền tin cậy](#lệnh-cài-đặt-và-quyền-tin-cậy) mô tả.
+
+Cái pane mới là điểm mấu chốt. Herdr gom stdout của một plugin action vào log lệnh và không hiển thị nó ở đâu cả, nên một bản xem trước do chính action in ra là bản xem trước không ai đọc. Pane đóng lại ngay khi bạn bấm phím tiếp theo. Khi Herdr từ chối mở pane — vì đang có một modal khác — action sẽ nói rõ lý do rồi quay về in bản xem trước vào log, nơi `herdr plugin log list` đọc được. Không ai bấm phím được trong log, nên ở đó plugin không bao giờ mời tin cậy.
 
 Ngay trước các lệnh là một dòng cho biết chúng có được chạy hay không: repository đã được tin cậy thì dòng đó ghi mã hash đang có hiệu lực, chưa thì ghi lý do bị bỏ qua và đúng dòng cần thêm vào `trusted-repos.txt`. Các lệnh `post_create` hiện ra đã thay biến và bọc nháy đúng như khi đến tay shell, và đó là cách nhanh nhất để thấy một chỗ điền cho ra giá trị gì. Các lệnh `post_remove` được liệt kê nguyên văn, vì dòng tin cậy cũng phê duyệt chúng, còn biến của chúng chỉ được điền lúc xoá worktree. Những dòng link, chép và dựng từ mẫu là danh sách đích đã được xác định, không phải lời hứa rằng từng cái sẽ thành công. Một chỗ điền không thay được sẽ được báo ra và lượt chạy kết thúc với mã khác 0.
 

@@ -20,15 +20,28 @@ function collectCopyTargets(repoRoot, config) {
   return [...new Set([...detected, ...config.copy])];
 }
 
+// C0 controls, DEL and C1 controls: everything a terminal may act on instead of
+// drawing. The preview is what trust is granted from, so a command must not be
+// able to erase or overwrite its own line and show the reader something else.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/** `text` with every control character spelled out as a visible `\xNN`. */
+export const visible = (text) =>
+  text.replace(CONTROL, (char) => `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`);
+
 const preview = (verb, path, detail) =>
-  console.log(`would ${verb.padEnd(4)} ${path}${detail ? ` — ${detail}` : ""}`);
+  console.log(visible(`would ${verb.padEnd(4)} ${path}${detail ? ` — ${detail}` : ""}`));
 
 /**
  * Print the run instead of performing it. Commands appear rendered and escaped
  * exactly as they would reach the shell; the copy, link and seed lines are the
  * targets as they were resolved, not a promise that each one would succeed.
+ *
+ * The trust verdict it printed goes into `seen.trust`, hash included, so the
+ * preview pane can grant trust for exactly the commands that were on screen.
  */
-function dryRun({ worktreePath, repoRoot }, config, vars, env) {
+function dryRun({ worktreePath, repoRoot }, config, vars, env, seen) {
   console.log("dry run: nothing is linked, copied, seeded or executed");
 
   for (const relative of config.symlink) preview("link", relative);
@@ -48,6 +61,7 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env) {
     // is a preview they have to follow up.
     const configDir = env.HERDR_PLUGIN_CONFIG_DIR;
     const { verdict, hash } = commandsVerdict(repoRoot, config, configDir, env);
+    seen.trust = { repoRoot, configDir, verdict, hash };
     console.log(
       verdict === "trusted"
         ? `commands trusted (sha256:${hash})`
@@ -78,7 +92,7 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env) {
   return failed ? 1 : 0;
 }
 
-export function run(env = process.env, argv = []) {
+export function run(env = process.env, argv = [], seen = {}) {
   const dry = argv.includes("--dry-run");
   const { worktreePath, repoRoot, branch, branchSource, event } = dry
     ? resolveTarget(env, argv)
@@ -97,7 +111,7 @@ export function run(env = process.env, argv = []) {
   console.log(config.configured ? `config ${CONFIG_FILENAME}` : "config defaults");
 
   const vars = worktreeVariables({ worktreePath, repoRoot, branch });
-  if (dry) return dryRun({ worktreePath, repoRoot }, config, vars, env);
+  if (dry) return dryRun({ worktreePath, repoRoot }, config, vars, env, seen);
 
   const results = [];
 
@@ -143,9 +157,9 @@ export function run(env = process.env, argv = []) {
 }
 
 /** `run` with the failure report every caller outside the tests owes the log. */
-export function runCli(env = process.env, argv = []) {
+export function runCli(env = process.env, argv = [], seen = {}) {
   try {
-    return run(env, argv);
+    return run(env, argv, seen);
   } catch (error) {
     console.error(`worktree setup failed: ${error.message}`);
     return 1;

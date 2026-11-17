@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { result } from "./report.mjs";
 import { render } from "./template.mjs";
@@ -67,6 +67,29 @@ export function readTrustList(configDir) {
   }
 }
 
+/**
+ * Append the line that trusts `repoRoot` with the commands hashed as `hash`,
+ * creating the list and its directory when they do not exist yet. Appending
+ * rather than rewriting keeps every comment and older line the owner wrote.
+ * Returns the path written, for the message that confirms it.
+ */
+export function addTrustLine(configDir, repoRoot, hash) {
+  const file = trustListPath(configDir);
+  mkdirSync(configDir, { recursive: true });
+
+  // A list whose last line has no newline would otherwise swallow this one.
+  let separator = "";
+  try {
+    const existing = readFileSync(file, "utf8");
+    if (existing !== "" && !existing.endsWith("\n")) separator = "\n";
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+
+  appendFileSync(file, `${separator}${trustLine(repoRoot, hash)}\n`);
+  return file;
+}
+
 // The same repository can be spelled several ways: a symlinked /var on macOS,
 // an 8.3 short name or either slash on Windows, a different case on both. Trust
 // must survive all of them, so every path is reduced to one canonical form.
@@ -109,7 +132,8 @@ export function commandsVerdict(repoRoot, config, configDir, env = process.env) 
 /**
  * Why a repository's commands are skipped, ending in the exact line that would
  * allow them. Every reason sends the reader to the dry run first: the line
- * approves whatever the commands are now, so it should not be pasted unread.
+ * approves whatever the commands are now, so it should not be granted unread,
+ * and the preview pane is where it can be granted with one key.
  */
 export function untrustedDetail(verdict, repoRoot, hash, configDir) {
   const file = trustListPath(configDir);
@@ -117,14 +141,14 @@ export function untrustedDetail(verdict, repoRoot, hash, configDir) {
   if (verdict === "legacy") {
     return (
       `${file} lists this repository without a hash, which no longer grants trust. ` +
-      `Read the commands with the dry-run action, then replace that line with: ${line}`
+      `Read the commands with the dry-run action and press t there, or replace that line with: ${line}`
     );
   }
   const why =
     verdict === "changed"
       ? "post_create or post_remove changed since this repository was trusted"
       : "repository is not trusted for commands";
-  return `${why}. Read them with the dry-run action, then add this line to ${file}: ${line}`;
+  return `${why}. Read them with the dry-run action and press t there, or add this line to ${file}: ${line}`;
 }
 
 /**
