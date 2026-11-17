@@ -80,3 +80,27 @@ test("rejects input outside the supported subset", () => {
     assert.throws(() => parseToml(source), TomlError, `expected a throw for: ${source}`);
   }
 });
+
+test("an error names the line and the key, never the text that broke", () => {
+  const cases = [
+    ["aws_secret = SECRET", /^unsupported value for aws_secret \(line 1\)$/],
+    ['token = "\\uSECRET"', /^bad unicode escape for token \(line 1\)$/],
+    ['token = "\\qSECRET"', /^unknown escape for token \(line 1\)$/],
+    ["# ok\n[SECRET section]", /^unsupported section header \(line 2\)$/],
+    ["SECRET", /^expected key = value \(line 1\)$/],
+    ["SECRET key = 1", /^unsupported key \(line 1\)$/],
+    ['list = ["a", SECRET]', /^unsupported value for list \(line 1\)$/],
+  ];
+  for (const [source, expected] of cases) {
+    assert.throws(
+      () => parseToml(source),
+      (error) => {
+        assert.ok(error instanceof TomlError);
+        assert.match(error.message, expected);
+        assert.doesNotMatch(error.message, /SECRET/);
+        return true;
+      },
+      source,
+    );
+  }
+});

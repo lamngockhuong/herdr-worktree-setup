@@ -51,7 +51,7 @@ function realAncestor(path) {
   }
 }
 
-function isWithin(path, root) {
+export function isWithin(path, root) {
   const rel = relativePath(root, path);
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }

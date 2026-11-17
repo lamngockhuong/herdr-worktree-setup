@@ -51,11 +51,68 @@ export function summaryLine({ done, failed, untrusted }) {
   return parts.length > 0 ? parts.join(", ") : "nothing to do";
 }
 
+// C0 controls, DEL, C1 controls, the line and paragraph separators, and the
+// Unicode format characters (bidi overrides and isolates, zero-width spaces,
+// the BOM): everything a terminal may act on, or reorder, instead of drawing.
+// The preview is what trust is granted from, so a command must not be able to
+// erase, overwrite or reverse its own line and show the reader something else.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+const UNDRAWN = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/gu;
+
+const escapeChar = (char) => {
+  const code = char.codePointAt(0);
+  if (code <= 0xff) return `\\x${code.toString(16).padStart(2, "0")}`;
+  return code <= 0xffff ? `\\u${code.toString(16).padStart(4, "0")}` : `\\u{${code.toString(16)}}`;
+};
+
+/** `text` with every character a terminal would not simply draw spelled out. */
+export const visible = (text) => text.replace(UNDRAWN, escapeChar);
+
+// How much of one command or path the preview prints, and how long a run of
+// spaces may be before it is counted rather than drawn. Only U+0020 is
+// counted: a newline or a tab means something to the shell, so every other
+// whitespace character is spelled out by `visible` like any control. A pane wraps a long
+// line, so without a bound one entry padded with spaces scrolls every line
+// above it out of sight, and the reader grants trust for commands never seen.
+const SHOWN_LIMIT = 160;
+const LONG_SPACE = 4;
+const PIECES = new RegExp(` {${LONG_SPACE},}|[\\s\\S]`, "gu");
+
+/**
+ * `text` as the preview prints it: escaped as `visible` does, every run of
+ * spaces from `LONG_SPACE` on drawn as `␠×N`, and cut once the drawn form
+ * passes `SHOWN_LIMIT`, with the number of characters left out. Display only: what is
+ * hashed and run is always the text itself.
+ */
+export function shown(text) {
+  let out = "";
+  let used = 0;
+  for (const piece of text.match(PIECES) ?? []) {
+    const drawn = piece.length >= LONG_SPACE ? `␠×${piece.length}` : visible(piece);
+    if (out.length + drawn.length > SHOWN_LIMIT) {
+      return `${out}… [${text.length - used} more characters not shown]`;
+    }
+    out += drawn;
+    used += piece.length;
+  }
+  return out;
+}
+
+/**
+ * Report the error that ended a hook or a preview. Its message can carry text
+ * from the repository, and the log and the pane are both read in a terminal.
+ */
+export function printFailure(prefix, error) {
+  console.error(visible(`${prefix}: ${error.message}`));
+}
+
 /** Write every result to stdout, which Herdr keeps in the plugin command log. */
 export function printReport(results) {
   for (const item of results) {
     const suffix = item.detail ? ` — ${item.detail}` : "";
-    console.log(`${item.status.padEnd(7)} ${item.action.padEnd(11)} ${item.path}${suffix}`);
+    console.log(
+      visible(`${item.status.padEnd(7)} ${item.action.padEnd(11)} ${item.path}${suffix}`),
+    );
   }
 }
 

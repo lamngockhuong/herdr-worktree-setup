@@ -5,7 +5,10 @@
 // those (single or multi line, trailing comma allowed).
 //
 // Anything outside the subset throws. A config file is small and hand written,
-// so a loud error beats a typo that silently parses as "no value".
+// so a loud error beats a typo that silently parses as "no value". An error
+// names the line, what was wrong and, once it is known to be a valid name, the
+// key, but never the text it read: that text reaches the log and the preview
+// pane, and the file may not be the config its name says.
 
 const BOOLEANS = { true: true, false: false };
 
@@ -20,8 +23,9 @@ const ESCAPES = {
 };
 
 class TomlError extends Error {
-  constructor(message, line) {
-    super(line === undefined ? message : `${message} (line ${line})`);
+  constructor(message, line, key) {
+    const subject = key === undefined ? message : `${message} for ${key}`;
+    super(line === undefined ? subject : `${subject} (line ${line})`);
     this.name = "TomlError";
   }
 }
@@ -54,7 +58,7 @@ function stripComment(line) {
   return stopped === -1 ? line : line.slice(0, stopped);
 }
 
-function parseBasicString(raw, lineNo) {
+function parseBasicString(raw, lineNo, key) {
   let out = "";
   for (let i = 1; i < raw.length - 1; i++) {
     const ch = raw[i];
@@ -67,20 +71,20 @@ function parseBasicString(raw, lineNo) {
       const width = next === "u" ? 4 : 8;
       const hex = raw.slice(i + 1, i + 1 + width);
       if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length !== width) {
-        throw new TomlError(`bad unicode escape \\${next}${hex}`, lineNo);
+        throw new TomlError("bad unicode escape", lineNo, key);
       }
       out += String.fromCodePoint(Number.parseInt(hex, 16));
       i += width;
       continue;
     }
-    if (!(next in ESCAPES)) throw new TomlError(`unknown escape \\${next}`, lineNo);
+    if (!(next in ESCAPES)) throw new TomlError("unknown escape", lineNo, key);
     out += ESCAPES[next];
   }
   return out;
 }
 
 // Split the inside of an array on commas that sit outside any string.
-function splitArrayItems(body, lineNo) {
+function splitArrayItems(body, lineNo, key) {
   const items = [];
   let start = 0;
   const { quote } = scan(body, (ch, i, depth) => {
@@ -89,32 +93,34 @@ function splitArrayItems(body, lineNo) {
     start = i + 1;
     return false;
   });
-  if (quote) throw new TomlError("unterminated string in array", lineNo);
+  if (quote) throw new TomlError("unterminated string in array", lineNo, key);
   items.push(body.slice(start));
   return items.map((item) => item.trim()).filter((item) => item !== "");
 }
 
-function parseValue(raw, lineNo) {
+function parseValue(raw, lineNo, key) {
   const text = raw.trim();
-  if (text === "") throw new TomlError("missing value", lineNo);
+  if (text === "") throw new TomlError("missing value", lineNo, key);
 
   if (Object.hasOwn(BOOLEANS, text)) return BOOLEANS[text];
 
   if (text.startsWith("[")) {
-    if (!text.endsWith("]")) throw new TomlError("unterminated array", lineNo);
-    return splitArrayItems(text.slice(1, -1), lineNo).map((item) => parseValue(item, lineNo));
+    if (!text.endsWith("]")) throw new TomlError("unterminated array", lineNo, key);
+    return splitArrayItems(text.slice(1, -1), lineNo, key).map((item) =>
+      parseValue(item, lineNo, key),
+    );
   }
 
   if (text.startsWith('"')) {
     if (text.length < 2 || !text.endsWith('"')) {
-      throw new TomlError("unterminated string", lineNo);
+      throw new TomlError("unterminated string", lineNo, key);
     }
-    return parseBasicString(text, lineNo);
+    return parseBasicString(text, lineNo, key);
   }
 
   if (text.startsWith("'")) {
     if (text.length < 2 || !text.endsWith("'")) {
-      throw new TomlError("unterminated string", lineNo);
+      throw new TomlError("unterminated string", lineNo, key);
     }
     return text.slice(1, -1);
   }
@@ -123,7 +129,7 @@ function parseValue(raw, lineNo) {
     return Number.parseInt(text.replaceAll("_", ""), 10);
   }
 
-  throw new TomlError(`unsupported value: ${text}`, lineNo);
+  throw new TomlError("unsupported value", lineNo, key);
 }
 
 // True while an array literal is still open, so the reader keeps joining lines.
@@ -159,7 +165,7 @@ export function parseToml(source) {
 
     if (line.startsWith("[")) {
       const match = /^\[([A-Za-z0-9_.-]+)\]$/.exec(line);
-      if (!match) throw new TomlError(`unsupported section header: ${line}`, lineNo);
+      if (!match) throw new TomlError("unsupported section header", lineNo);
       const name = match[1];
       // Reopening a section would drop everything the first one held.
       if (Object.hasOwn(root, name)) throw new TomlError(`duplicate key: ${name}`, lineNo);
@@ -169,20 +175,20 @@ export function parseToml(source) {
     }
 
     const eq = line.indexOf("=");
-    if (eq === -1) throw new TomlError(`expected key = value: ${line}`, lineNo);
+    if (eq === -1) throw new TomlError("expected key = value", lineNo);
 
     const key = line.slice(0, eq).trim();
-    if (!/^[A-Za-z0-9_-]+$/.test(key)) throw new TomlError(`unsupported key: ${key}`, lineNo);
+    if (!/^[A-Za-z0-9_-]+$/.test(key)) throw new TomlError("unsupported key", lineNo);
     if (Object.hasOwn(table, key)) throw new TomlError(`duplicate key: ${key}`, lineNo);
 
     let rest = line.slice(eq + 1).trim();
     while (isIncomplete(rest)) {
       i++;
-      if (i >= lines.length) throw new TomlError("unterminated array", lineNo);
+      if (i >= lines.length) throw new TomlError("unterminated array", lineNo, key);
       rest += `\n${stripComment(lines[i]).trim()}`;
     }
 
-    setKey(table, key, parseValue(rest, lineNo));
+    setKey(table, key, parseValue(rest, lineNo, key));
   }
 
   return root;

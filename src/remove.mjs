@@ -5,7 +5,15 @@ import { pathToFileURL } from "node:url";
 import { runCommands } from "./commands.mjs";
 import { loadConfig } from "./config.mjs";
 import { readContext } from "./context.mjs";
-import { cleanupToast, notify, printReport, summarize, summaryLine } from "./report.mjs";
+import {
+  cleanupToast,
+  notify,
+  printFailure,
+  printReport,
+  summarize,
+  summaryLine,
+  visible,
+} from "./report.mjs";
 import { worktreeVariables } from "./template.mjs";
 
 /**
@@ -24,8 +32,8 @@ export function run(env = process.env) {
   // filling the log with a report about a repository that asked for none.
   if (config.post_remove.length === 0) return 0;
 
-  console.log(`worktree ${worktreePath} (removed)`);
-  console.log(`repository ${repoRoot}${branch ? ` (${branch})` : ""}`);
+  console.log(visible(`worktree ${worktreePath} (removed)`));
+  console.log(visible(`repository ${repoRoot}${branch ? ` (${branch})` : ""}`));
 
   const vars = worktreeVariables({ worktreePath, repoRoot, branch });
 
@@ -59,7 +67,7 @@ export function runCli(env = process.env) {
   try {
     return run(env);
   } catch (error) {
-    console.error(`worktree cleanup failed: ${error.message}`);
+    printFailure("worktree cleanup failed", error);
     return 1;
   }
 }

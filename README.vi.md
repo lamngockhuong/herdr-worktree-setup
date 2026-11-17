@@ -116,6 +116,8 @@ Gõ sai tên key là lỗi chứ không phải chuyện cho qua: plugin nêu đ�
 
 File được đọc bằng một lát cắt rất nhỏ của TOML, hẹp như vậy là có chủ ý: dòng chú thích, `key = value`, và một cấp tiêu đề `[section]`, trong đó giá trị là boolean, số nguyên, chuỗi, hoặc danh sách những kiểu đó. Cú pháp khác sẽ báo lỗi rõ ràng thay vì âm thầm hiểu sai.
 
+File cấu hình phải là file thường nằm ở gốc repository và không lớn quá 64 KiB. Nếu `.herdr-worktree.toml` được commit dưới dạng symlink, plugin từ chối chứ không đọc theo link, vì link đó có thể trỏ tới bất kỳ file nào bạn đọc được. Thông báo lỗi nêu chỗ sai, kèm số dòng, tên key hoặc vị trí của mục khi có, nhưng không bao giờ chép lại đoạn chữ gây lỗi: thông báo ấy hiện trong log của plugin và trong pane xem trước.
+
 Còn chuyện một repository cụ thể thật ra cần key nào — monorepo, ứng dụng Rails, một workspace Terraform — thì xem [docs/recipes.vi.md](docs/recipes.vi.md).
 
 ### `seed_from_example`
@@ -136,7 +138,9 @@ Pane xem trước liệt kê các lệnh. Nếu repository chưa được tin c�
 press t to trust these commands for this repository, any other key to close
 ```
 
-Bấm `t` thì pane ghi dòng tin cậy cho đúng những lệnh đang hiện trên màn hình, rồi cho biết đã ghi vào đâu. Bấm phím khác, kể cả Escape và Ctrl+C, thì pane đóng lại và không ghi gì. Nếu cấu hình bị sửa trong khoảng từ lúc bản xem trước hiện ra đến lúc bấm phím, pane cũng không ghi gì và yêu cầu bạn mở lại bản xem trước: chỉ những lệnh bạn đã đọc mới được tin cậy.
+Bấm `t` thì pane ghi dòng tin cậy cho những lệnh bản xem trước đã liệt kê, đúng như chúng nằm trong file, rồi cho biết đã ghi vào đâu. Bấm phím khác, kể cả Escape và Ctrl+C, thì pane đóng lại và không ghi gì. Nếu cấu hình bị sửa trong khoảng từ lúc bản xem trước hiện ra đến lúc bấm phím, pane cũng không ghi gì và yêu cầu bạn mở lại bản xem trước: dòng tin cậy chỉ được ghi cho đúng cấu hình mà bản xem trước đã hiện.
+
+Để không lệnh nào đẩy được lệnh khác ra khỏi tầm nhìn, pane giới hạn những gì nó in. Một chuỗi từ bốn dấu cách trở lên hiện thành `␠×N`. Ký tự điều khiển và ký tự định dạng Unicode, kể cả dấu xuống dòng và tab, hiện dưới dạng `\xNN` hoặc `\uNNNN`. Lệnh nào khi in ra dài quá 160 ký tự thì bị cắt, cuối dòng ghi số ký tự bị ẩn. Dòng tin cậy vẫn áp cho trọn lệnh đã bị cắt, nên hãy đọc phần còn lại trong `.herdr-worktree.toml` trước khi bấm `t`. Dòng ngay trên lời mời ghi số lệnh của từng khối; nếu phía trên có ít lệnh hơn con số đó, hãy cuộn lên đọc trước khi bấm `t`. Chỉ phần hiển thị được rút gọn: dòng tin cậy vẫn áp cho các lệnh đúng như trong file.
 
 Muốn mở bản xem trước bằng một phím, hãy gán action đó trong cấu hình của chính Herdr:
 
@@ -258,6 +262,7 @@ would copy apps/api/.env.local
 commands trusted (sha256:3f9a…)
 would run  docker compose -p 'demo'-'feature-checkout' up -d
 would run  docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v — on removal, shown unrendered
+the trust line covers 1 post_create command and 1 post_remove command, listed above
 
 press any key to close
 ```
@@ -266,7 +271,7 @@ Khi repository chưa được tin cậy với các lệnh đang hiện, dòng cu
 
 Cái pane mới là điểm mấu chốt. Herdr gom stdout của một plugin action vào log lệnh và không hiển thị nó ở đâu cả, nên một bản xem trước do chính action in ra là bản xem trước không ai đọc. Pane đóng lại ngay khi bạn bấm phím tiếp theo. Khi Herdr từ chối mở pane — vì đang có một modal khác — action sẽ nói rõ lý do rồi quay về in bản xem trước vào log, nơi `herdr plugin log list` đọc được. Không ai bấm phím được trong log, nên ở đó plugin không bao giờ mời tin cậy.
 
-Ngay trước các lệnh là một dòng cho biết chúng có được chạy hay không: repository đã được tin cậy thì dòng đó ghi mã hash đang có hiệu lực, chưa thì ghi lý do bị bỏ qua và đúng dòng cần thêm vào `trusted-repos.txt`. Các lệnh `post_create` hiện ra đã thay biến và bọc nháy đúng như khi đến tay shell, và đó là cách nhanh nhất để thấy một chỗ điền cho ra giá trị gì. Các lệnh `post_remove` được liệt kê nguyên văn, vì dòng tin cậy cũng phê duyệt chúng, còn biến của chúng chỉ được điền lúc xoá worktree. Những dòng link, chép và dựng từ mẫu là danh sách đích đã được xác định, không phải lời hứa rằng từng cái sẽ thành công. Một chỗ điền không thay được sẽ được báo ra và lượt chạy kết thúc với mã khác 0.
+Ngay trước các lệnh là một dòng cho biết chúng có được chạy hay không: repository đã được tin cậy thì dòng đó ghi mã hash đang có hiệu lực, chưa thì ghi lý do bị bỏ qua và đúng dòng cần thêm vào `trusted-repos.txt`. Các lệnh `post_create` hiện ra đã thay biến và bọc nháy đúng như khi đến tay shell, và đó là cách nhanh nhất để thấy một chỗ điền cho ra giá trị gì. Các lệnh `post_remove` được liệt kê nguyên văn, vì dòng tin cậy cũng phê duyệt chúng, còn biến của chúng chỉ được điền lúc xoá worktree. Những dòng link, chép và dựng từ mẫu là danh sách đích đã được xác định, không phải lời hứa rằng từng cái sẽ thành công. Một chỗ điền không thay được sẽ được báo ra và lượt chạy kết thúc với mã khác 0. Dòng cuối cùng ghi số lệnh của từng khối. Mọi dòng, kể cả thông báo lỗi, đều được thoát ký tự, còn mọi lệnh và đường dẫn đều bị giới hạn độ dài, như mục [Lệnh cài đặt và quyền tin cậy](#lệnh-cài-đặt-và-quyền-tin-cậy) mô tả, nên không thứ gì repository viết ra đến được cửa sổ dòng lệnh của bạn dưới dạng nào khác ngoài chữ. Một lệnh `post_create` đứng sau lệnh có chỗ điền không thay được vẫn được liệt kê nguyên văn, vì dòng tin cậy cũng áp cho nó.
 
 Ngoài Herdr, `node src/index.mjs --dry-run /đường/dẫn/worktree` cho kết quả tương tự; nếu không đưa đường dẫn, plugin dùng workspace mà Herdr đang mở, hoặc thư mục hiện tại.
 

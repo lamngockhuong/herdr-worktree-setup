@@ -7,7 +7,16 @@ import { commandsVerdict, runCommands, untrustedDetail } from "./commands.mjs";
 import { CONFIG_FILENAME, loadConfig } from "./config.mjs";
 import { readContext, resolveTarget } from "./context.mjs";
 import { detectFiles } from "./detect.mjs";
-import { notify, printReport, setupToast, summarize, summaryLine } from "./report.mjs";
+import {
+  notify,
+  printFailure,
+  printReport,
+  setupToast,
+  shown,
+  summarize,
+  summaryLine,
+  visible,
+} from "./report.mjs";
 import { render, worktreeVariables } from "./template.mjs";
 
 function collectCopyTargets(repoRoot, config) {
@@ -20,18 +29,15 @@ function collectCopyTargets(repoRoot, config) {
   return [...new Set([...detected, ...config.copy])];
 }
 
-// C0 controls, DEL and C1 controls: everything a terminal may act on instead of
-// drawing. The preview is what trust is granted from, so a command must not be
-// able to erase or overwrite its own line and show the reader something else.
-// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
-
-/** `text` with every control character spelled out as a visible `\xNN`. */
-export const visible = (text) =>
-  text.replace(CONTROL, (char) => `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`);
+// Every line of the dry run goes through here. Its output is the preview pane,
+// where trust is granted, so nothing a repository put in a path, a command or
+// an error message may reach the terminal as anything but drawn text.
+const say = (line) => console.log(visible(line));
 
 const preview = (verb, path, detail) =>
-  console.log(visible(`would ${verb.padEnd(4)} ${path}${detail ? ` — ${detail}` : ""}`));
+  say(`would ${verb.padEnd(4)} ${shown(path)}${detail ? ` — ${shown(detail)}` : ""}`);
+
+const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
  * Print the run instead of performing it. Commands appear rendered and escaped
@@ -39,10 +45,10 @@ const preview = (verb, path, detail) =>
  * targets as they were resolved, not a promise that each one would succeed.
  *
  * The trust verdict it printed goes into `seen.trust`, hash included, so the
- * preview pane can grant trust for exactly the commands that were on screen.
+ * preview pane can grant trust for exactly the commands it listed, as written.
  */
 function dryRun({ worktreePath, repoRoot }, config, vars, env, seen) {
-  console.log("dry run: nothing is linked, copied, seeded or executed");
+  say("dry run: nothing is linked, copied, seeded or executed");
 
   for (const relative of config.symlink) preview("link", relative);
   for (const relative of collectCopyTargets(repoRoot, config)) preview("copy", relative);
@@ -62,7 +68,7 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env, seen) {
     const configDir = env.HERDR_PLUGIN_CONFIG_DIR;
     const { verdict, hash } = commandsVerdict(repoRoot, config, configDir, env);
     seen.trust = { repoRoot, configDir, verdict, hash };
-    console.log(
+    say(
       verdict === "trusted"
         ? `commands trusted (sha256:${hash})`
         : "the commands below are shown rendered but would be skipped: " +
@@ -70,15 +76,20 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env, seen) {
     );
   }
 
+  // The real run stops the sequence at a render failure, so say so here too.
+  // The commands after it are still listed, unrendered: the trust line covers
+  // them, and a template that fails here may render on another checkout.
   let failed = false;
   for (const command of config.post_create) {
+    if (failed) {
+      preview("run", command, "not reached here: an earlier template failed, shown unrendered");
+      continue;
+    }
     try {
       preview("run", render(command, vars));
     } catch (error) {
-      // The real run stops the sequence at a render failure, so say so here too.
       preview("fail", command, error.message);
       failed = true;
-      break;
     }
   }
 
@@ -87,6 +98,15 @@ function dryRun({ worktreePath, repoRoot }, config, vars, env, seen) {
   // variables may say something else.
   for (const command of config.post_remove) {
     preview("run", command, "on removal, shown unrendered");
+  }
+
+  // Last, so it lands right above the trust prompt: a reader who counts fewer
+  // lines above than this knows the list has scrolled and is not complete.
+  if (config.post_create.length > 0 || config.post_remove.length > 0) {
+    say(
+      `the trust line covers ${plural(config.post_create.length, "post_create command")} ` +
+        `and ${plural(config.post_remove.length, "post_remove command")}, listed above`,
+    );
   }
 
   return failed ? 1 : 0;
@@ -99,16 +119,16 @@ export function run(env = process.env, argv = [], seen = {}) {
     : readContext(env);
   const config = loadConfig(repoRoot);
 
-  console.log(`worktree ${worktreePath}`);
-  console.log(`repository ${repoRoot}${branch ? ` (${branch})` : ""}`);
+  say(`worktree ${worktreePath}`);
+  say(`repository ${repoRoot}${branch ? ` (${branch})` : ""}`);
 
   // An event that names no branch is how a payload the plugin has stopped
   // understanding looks from in here: git covers for it silently while the
   // checkout exists, and `worktree.removed` then fails with nothing to go on.
   if (event && branchSource === "checkout") {
-    console.log("note: the event named no branch, so it was read from the checkout instead");
+    say("note: the event named no branch, so it was read from the checkout instead");
   }
-  console.log(config.configured ? `config ${CONFIG_FILENAME}` : "config defaults");
+  say(config.configured ? `config ${CONFIG_FILENAME}` : "config defaults");
 
   const vars = worktreeVariables({ worktreePath, repoRoot, branch });
   if (dry) return dryRun({ worktreePath, repoRoot }, config, vars, env, seen);
@@ -161,7 +181,7 @@ export function runCli(env = process.env, argv = [], seen = {}) {
   try {
     return run(env, argv, seen);
   } catch (error) {
-    console.error(`worktree setup failed: ${error.message}`);
+    printFailure("worktree setup failed", error);
     return 1;
   }
 }

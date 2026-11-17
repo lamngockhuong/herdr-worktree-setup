@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdirSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
 import { after, test } from "node:test";
 import { ConfigError, DEFAULTS, loadConfig, normalizeConfig } from "../src/config.mjs";
 import { parseToml } from "../src/toml.mjs";
@@ -68,4 +70,54 @@ test("paths that leave the repository are rejected", () => {
   assert.throws(() => normalizeConfig({ copy: ["/etc/passwd"] }), ConfigError);
   assert.throws(() => normalizeConfig({ symlink: ["C:\\Windows"] }), ConfigError);
   assert.throws(() => normalizeConfig({ copy: [""] }), ConfigError);
+});
+
+test("a path entry that is refused is named by position, not repeated", () => {
+  for (const entry of ["/X\u001b]52;c;QQ==\u0007", "../SECRET-PATH"]) {
+    assert.throws(
+      () => normalizeConfig({ copy: ["fine", entry] }),
+      (error) => {
+        assert.match(error.message, /^copy entry 2 must /);
+        assert.equal(error.message.includes(entry), false, error.message);
+        return true;
+      },
+    );
+  }
+});
+
+test("a config that is a symbolic link is refused without reading what it points at", () => {
+  const outside = makeRepo({ "credentials.txt": "aws_secret = FAKEVALUE\n" });
+  const repo = makeRepo();
+  symlinkSync(join(outside, "credentials.txt"), join(repo, ".herdr-worktree.toml"));
+
+  assert.throws(
+    () => loadConfig(repo),
+    (error) => {
+      assert.ok(error instanceof ConfigError);
+      assert.match(error.message, /\.herdr-worktree\.toml is a symbolic link/);
+      assert.doesNotMatch(error.message, /FAKEVALUE|aws_secret/);
+      return true;
+    },
+  );
+});
+
+test("a config that is not a regular file is refused", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, ".herdr-worktree.toml"));
+
+  assert.throws(() => loadConfig(repo), /\.herdr-worktree\.toml is not a regular file/);
+});
+
+test("a config larger than the limit is refused before it is read", () => {
+  const repo = makeRepo();
+  write(repo, ".herdr-worktree.toml", `# ${"x".repeat(64 * 1024)}\nnotify = false\n`);
+
+  assert.throws(
+    () => loadConfig(repo),
+    (error) => {
+      assert.ok(error instanceof ConfigError);
+      assert.match(error.message, /larger than 64 KiB/);
+      return true;
+    },
+  );
 });

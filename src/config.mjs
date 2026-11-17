@@ -1,5 +1,14 @@
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
 import { join } from "node:path";
+import { isWithin } from "./apply.mjs";
 import { DEFAULT_PATTERNS, toPosix } from "./detect.mjs";
 import { parseToml } from "./toml.mjs";
 
@@ -50,13 +59,16 @@ function checkType(key, value, type) {
 // Entries name paths inside the repository. Anything absolute or climbing out
 // of it is a mistake worth reporting rather than resolving. The POSIX spelling
 // every caller wants is produced here, so no consumer has to convert again.
-function checkPath(key, value) {
+// The entry is named by its position and never quoted: the message reaches the
+// log and the preview pane, and the value is whatever the repository wrote.
+function checkPath(key, value, index) {
   const posix = toPosix(value);
+  const entry = `${key} entry ${index + 1}`;
   if (posix === "" || posix.startsWith("/") || /^[A-Za-z]:/.test(posix)) {
-    throw new ConfigError(`${key} entry must be relative to the repository root: ${value}`);
+    throw new ConfigError(`${entry} must be relative to the repository root`);
   }
   if (posix.split("/").includes("..")) {
-    throw new ConfigError(`${key} entry must stay inside the repository: ${value}`);
+    throw new ConfigError(`${entry} must stay inside the repository`);
   }
   return posix;
 }
@@ -74,10 +86,65 @@ export function normalizeConfig(raw) {
 
   for (const [key, spec] of Object.entries(KEYS)) {
     if (Object.hasOwn(raw, key)) checkType(key, raw[key], spec.type);
-    if (spec.path) config[key] = config[key].map((entry) => checkPath(key, entry));
+    if (spec.path) config[key] = config[key].map((entry, index) => checkPath(key, entry, index));
   }
 
   return config;
+}
+
+// A config is a few hundred bytes written by hand. The bound keeps a file that
+// is not one, a log or a generated blob, from being read whole into memory.
+export const MAX_CONFIG_BYTES = 64 * 1024;
+
+// Refuses `O_NOFOLLOW` where the platform has it, so a link swapped in after
+// the check below is not followed either. Windows has none, and the check is
+// what holds there.
+const READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
+
+/**
+ * The config file's text, or undefined when there is none. Only a regular file
+ * inside the repository is read: a link could point at any file the user can
+ * read, and a parse error quotes the line it stopped at, so a committed link to
+ * a credentials file would print a credential into the log and the pane. A
+ * device or a pipe could be read forever.
+ */
+function readConfigFile(repoRoot) {
+  const path = join(repoRoot, CONFIG_FILENAME);
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat) return undefined;
+
+  if (stat.isSymbolicLink()) {
+    throw new ConfigError(
+      `${CONFIG_FILENAME} is a symbolic link; the config must be a regular file in the repository`,
+    );
+  }
+  if (!stat.isFile()) throw new ConfigError(`${CONFIG_FILENAME} is not a regular file`);
+  if (!isWithin(realpathSync.native(path), realpathSync.native(repoRoot))) {
+    throw new ConfigError(`${CONFIG_FILENAME} resolves to a file outside the repository`);
+  }
+
+  const tooLarge = new ConfigError(
+    `${CONFIG_FILENAME} is larger than ${MAX_CONFIG_BYTES / 1024} KiB, which no config needs`,
+  );
+  if (stat.size > MAX_CONFIG_BYTES) throw tooLarge;
+
+  const fd = openSync(path, READ_FLAGS);
+  try {
+    if (!fstatSync(fd).isFile()) throw new ConfigError(`${CONFIG_FILENAME} is not a regular file`);
+    // One byte past the bound tells a file that grew since the check from one
+    // that fits exactly.
+    const buffer = Buffer.alloc(MAX_CONFIG_BYTES + 1);
+    let length = 0;
+    let read;
+    do {
+      read = readSync(fd, buffer, length, buffer.length - length, null);
+      length += read;
+    } while (read > 0 && length < buffer.length);
+    if (length > MAX_CONFIG_BYTES) throw tooLarge;
+    return buffer.toString("utf8", 0, length);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**
@@ -85,13 +152,8 @@ export function normalizeConfig(raw) {
  * one gets the defaults, which is what makes the plugin useful with no setup.
  */
 export function loadConfig(repoRoot) {
-  let source;
-  try {
-    source = readFileSync(join(repoRoot, CONFIG_FILENAME), "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return { ...DEFAULTS, configured: false };
-    throw error;
-  }
+  const source = readConfigFile(repoRoot);
+  if (source === undefined) return { ...DEFAULTS, configured: false };
   return { ...normalizeConfig(parseToml(source)), configured: true };
 }
 

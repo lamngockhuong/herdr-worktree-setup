@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { cleanupToast, setupToast, summarize, summaryLine, TRUST_HINT } from "../src/report.mjs";
+import {
+  cleanupToast,
+  printReport,
+  setupToast,
+  summarize,
+  summaryLine,
+  TRUST_HINT,
+} from "../src/report.mjs";
 
 const results = [
   { action: "copy", path: "a/.env", status: "done" },
@@ -93,4 +100,13 @@ test("the way out a skipped toast names is the action the manifest declares", ()
 
   assert.ok(title, "the dry-run action lost its title");
   assert.ok(TRUST_HINT.includes(title), TRUST_HINT);
+});
+
+test("the hook report spells out control characters a repository put in a path", (t) => {
+  const lines = [];
+  t.mock.method(console, "log", (line) => lines.push(line));
+
+  printReport([{ action: "copy", path: "a\u001b]52;c;QQ==\u0007", status: "failed", detail: "x" }]);
+
+  assert.equal(lines[0], "failed  copy        a\\x1b]52;c;QQ==\\x07 — x");
 });

@@ -9,6 +9,7 @@ import { addTrustLine, commandsVerdict, trustLine } from "./commands.mjs";
 import { loadConfig } from "./config.mjs";
 import { herdrCli } from "./herdr.mjs";
 import { runCli } from "./index.mjs";
+import { visible } from "./report.mjs";
 
 // Both name entries in herdr-plugin.toml; a test holds them to it.
 export const PLUGIN_ID = "lamngockhuong.worktree-setup";
@@ -103,11 +104,11 @@ export async function closePane(offer, env, { interactive, readKey }) {
     if (!TRUST_KEY.test(await readKey())) return;
 
     try {
-      console.log(grantTrust(offer, env));
+      console.log(visible(grantTrust(offer, env)));
     } catch (error) {
       // A config broken between drawing and the key press, or a list that
       // cannot be written: nothing was trusted, and the pane must still close.
-      console.log(`not trusted: ${error.message}`);
+      console.log(visible(`not trusted: ${error.message}`));
     }
   }
 

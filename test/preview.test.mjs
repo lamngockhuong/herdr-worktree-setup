@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { readTrustList, TRUST_FILENAME } from "../src/commands.mjs";
+import { commandsHash, readTrustList, TRUST_FILENAME, trustLine } from "../src/commands.mjs";
 import { ENTRYPOINT_ID, main, PLUGIN_ID, paneFailure } from "../src/preview.mjs";
 import {
   addWorktree,
@@ -221,4 +221,45 @@ test("a command cannot hide itself from the preview trust is granted from", asyn
 
   assert.ok(output.includes("would run  rm -rf ~ \\x1b[2K\\x1b[1Gwould run  pnpm install"), output);
   assert.equal(output.includes("\u001b"), false);
+});
+
+/** A repository whose second command pads itself out to push the first away. */
+function paddedRepo() {
+  const commands = ["echo EVIL-FIRST-COMMAND", `true${" ".repeat(6000)}`, "pnpm install"];
+  const repo = makeRepo();
+  write(repo, ".herdr-worktree.toml", `post_create = ${JSON.stringify(commands)}\nnotify = false`);
+  const cfg = configDir(null);
+  const env = pluginEnv(
+    repo,
+    addWorktree(repo, "padded"),
+    { HERDR_PLUGIN_CONFIG_DIR: cfg },
+    "padded",
+  );
+  return { repo, cfg, env, commands };
+}
+
+test("every command and their count sit just above the trust prompt", async (t) => {
+  const { env } = paddedRepo();
+
+  const { output } = await pane(t, env, ["x"]);
+  const lines = output.split("\n");
+  const prompt = lines.findIndex((line) => line.startsWith("press t to trust"));
+  const above = lines.slice(Math.max(0, prompt - 6), prompt).join("\n");
+
+  assert.ok(prompt > 0, output);
+  assert.match(above, /echo EVIL-FIRST-COMMAND/);
+  assert.match(above, /true␠×6000/);
+  assert.match(above, /pnpm install/);
+  assert.match(above, /3 post_create commands and 0 post_remove commands/);
+});
+
+test("trust granted from a shortened preview covers the commands as written", async (t) => {
+  const { repo, cfg, env, commands } = paddedRepo();
+
+  const { output } = await pane(t, env, ["t", "x"]);
+
+  // Hashed from the strings in the file, not from anything the pane printed.
+  const hash = commandsHash({ post_create: commands, post_remove: [] });
+  assert.match(output, /trusted: added /);
+  assert.equal(readFileSync(join(cfg, TRUST_FILENAME), "utf8"), `${trustLine(repo, hash)}\n`);
 });

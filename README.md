@@ -116,6 +116,8 @@ A misspelled key is an error, not a shrug: the plugin names it and lists the val
 
 The file reads a deliberately small slice of TOML: comments, `key = value`, and one level of `[section]` headers, where a value is a boolean, an integer, a string, or a list of those. Anything else fails loudly rather than parsing into silence.
 
+The config must be a regular file at the repository root, no larger than 64 KiB. A `.herdr-worktree.toml` committed as a symbolic link is refused rather than followed, because it could point at any file you can read. An error names what was wrong, with the line, the key or the entry's position where it has them, but never repeats the text it stopped at: the message lands in the plugin log and the preview pane.
+
 For which of these keys a given repository actually needs — a monorepo, a Rails application, a Terraform workspace — see [docs/recipes.md](docs/recipes.md).
 
 ### `seed_from_example`
@@ -136,7 +138,9 @@ The preview pane lists the commands, and when the repository is not trusted for 
 press t to trust these commands for this repository, any other key to close
 ```
 
-Press `t` and the pane writes the trust line for exactly the commands on screen, then says where it wrote it. Any other key, Escape and Ctrl+C included, closes the pane and writes nothing. If the config changed between the preview being drawn and the key press, nothing is written either, and the pane asks you to open the preview again: trust is only granted for commands you have read.
+Press `t` and the pane writes the trust line for the commands the preview listed, as the file holds them, then says where it wrote it. Any other key, Escape and Ctrl+C included, closes the pane and writes nothing. If the config changed between the preview being drawn and the key press, nothing is written either, and the pane asks you to open the preview again: trust is only granted for the config the preview was drawn from.
+
+So that no command can push another out of sight, the pane bounds what it prints. A run of four or more spaces is drawn as `␠×N`; control and Unicode format characters, newlines and tabs included, are spelled out as `\xNN` or `\uNNNN`; and a command whose printed form passes 160 characters is cut and ends with how many characters were left out. A cut command is still covered by the trust line in full, so read the rest in `.herdr-worktree.toml` before pressing `t`. The line just above the prompt counts the commands in each block; if fewer are listed above it, scroll up before pressing `t`. Only the display is shortened: the trust line covers the commands as the file holds them.
 
 To reach the preview with one key, bind the action in Herdr's own config:
 
@@ -258,6 +262,7 @@ would copy apps/api/.env.local
 commands trusted (sha256:3f9a…)
 would run  docker compose -p 'demo'-'feature-checkout' up -d
 would run  docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v — on removal, shown unrendered
+the trust line covers 1 post_create command and 1 post_remove command, listed above
 
 press any key to close
 ```
@@ -266,7 +271,7 @@ When the repository is not trusted for the commands shown, the last line offers 
 
 The pane is the point. Herdr captures the stdout of a plugin action into the command log and displays it nowhere, so a preview the action printed itself would be a preview nobody reads. The pane closes on the next key you press. When Herdr will not open one — another modal is already up — the action says so and falls back to printing the preview into the log, where `herdr plugin log list` finds it. Nobody can press a key in the log, so trust is never offered there.
 
-A line before the commands says whether they would run: the hash in force when the repository is trusted, or the reason they would be skipped and the exact line to add to `trusted-repos.txt`. `post_create` commands appear rendered and quoted exactly as they would reach the shell, which is the fastest way to see what a template resolves to. `post_remove` commands are listed as written, because the trust line approves them too and their variables are only filled in at removal. The copy, link and seed lines are the targets as they were resolved, not a promise that each one would succeed. A template that cannot be rendered is reported and exits non-zero.
+A line before the commands says whether they would run: the hash in force when the repository is trusted, or the reason they would be skipped and the exact line to add to `trusted-repos.txt`. `post_create` commands appear rendered and quoted exactly as they would reach the shell, which is the fastest way to see what a template resolves to. `post_remove` commands are listed as written, because the trust line approves them too and their variables are only filled in at removal. The copy, link and seed lines are the targets as they were resolved, not a promise that each one would succeed. A template that cannot be rendered is reported and exits non-zero. The last line counts the commands in each block. Every line, an error message included, is escaped, and every command and path is bounded, as [Setup commands and trust](#setup-commands-and-trust) describes, so nothing a repository wrote reaches your terminal as anything but text. A `post_create` command after one whose template failed is still listed, unrendered, because the trust line covers it too.
 
 Outside Herdr, `node src/index.mjs --dry-run /path/to/worktree` does the same; with no path it uses the workspace Herdr has in focus, or the current directory.
 
