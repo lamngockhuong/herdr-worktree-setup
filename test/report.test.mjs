@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import { cleanupToast, setupToast, summarize, summaryLine } from "../src/report.mjs";
+import { cleanupToast, setupToast, summarize, summaryLine, TRUST_HINT } from "../src/report.mjs";
 
 const results = [
   { action: "copy", path: "a/.env", status: "done" },
@@ -33,7 +35,7 @@ test("counts a command block the trust gate skipped, apart from skipped files", 
 test("a setup whose commands were skipped does not call itself ready", () => {
   assert.deepEqual(setupToast(summarize(untrusted), "x", "feature/checkout"), {
     title: "Worktree ready, commands skipped",
-    body: "feature/checkout: x",
+    body: `feature/checkout: x; ${TRUST_HINT}`,
   });
 });
 
@@ -41,7 +43,7 @@ test("a teardown the trust gate skipped is worth a toast, since nothing was clea
   const skipped = summarize([{ action: "post_remove", path: "/repo", status: "skipped" }]);
   assert.deepEqual(cleanupToast(skipped, "x", "feature/checkout"), {
     title: "Worktree cleanup skipped",
-    body: "feature/checkout: x",
+    body: `feature/checkout: x; ${TRUST_HINT}`,
   });
 });
 
@@ -83,4 +85,12 @@ test("a teardown that went fine is not worth interrupting someone who has moved 
     title: "Worktree cleanup incomplete",
     body: "feature/checkout: 1 failed",
   });
+});
+
+test("the way out a skipped toast names is the action the manifest declares", () => {
+  const manifest = readFileSync(join(import.meta.dirname, "../herdr-plugin.toml"), "utf8");
+  const title = /^id = "dry-run"\ntitle = "([^"]+)"$/m.exec(manifest)?.[1];
+
+  assert.ok(title, "the dry-run action lost its title");
+  assert.ok(TRUST_HINT.includes(title), TRUST_HINT);
 });

@@ -127,10 +127,29 @@ Off by default, and that is a judgment call worth explaining. A `.env` full of `
 `post_create` and `post_remove` run commands the *repository* chose. Cloning someone's project and opening a worktree must never be enough to execute them, so the machine's owner opts each repository in, from outside the repository, for the exact commands it holds:
 
 ```bash
-herdr plugin action invoke lamngockhuong.worktree-setup.dry-run   # read the commands first
-herdr plugin config-dir lamngockhuong.worktree-setup
-# append the line the dry run printed to trusted-repos.txt in that directory
+herdr plugin action invoke lamngockhuong.worktree-setup.dry-run
 ```
+
+The preview pane lists the commands, and when the repository is not trusted for them it ends with:
+
+```
+press t to trust these commands for this repository, any other key to close
+```
+
+Press `t` and the pane writes the trust line for exactly the commands on screen, then says where it wrote it. Any other key, Escape and Ctrl+C included, closes the pane and writes nothing. If the config changed between the preview being drawn and the key press, nothing is written either, and the pane asks you to open the preview again: trust is only granted for commands you have read.
+
+To reach the preview with one key, bind the action in Herdr's own config:
+
+```toml
+# ~/.config/herdr/config.toml — Herdr's config, not this plugin's
+[[keys.command]]
+key = "prefix+w"
+type = "plugin_action"
+command = "lamngockhuong.worktree-setup.dry-run"
+description = "preview and trust worktree setup"
+```
+
+The toast for a skipped block points to the same place. The list can also be edited by hand: `herdr plugin config-dir lamngockhuong.worktree-setup` prints the directory that holds `trusted-repos.txt`, and the dry run prints the line to append.
 
 Each line is the repository's absolute path followed by a hash of its two command blocks; `#` starts a comment:
 
@@ -138,7 +157,7 @@ Each line is the repository's absolute path followed by a hash of its two comman
 /home/you/projects/my-app sha256:3f9a…
 ```
 
-You never compute the hash yourself. Until a matching line is there, both blocks are skipped, the toast says the commands were skipped, and the log and the dry run print the exact line to add. One line covers both blocks: a repository you trust to set a worktree up is trusted to tear it down again.
+You never compute the hash yourself. Until a matching line is there, both blocks are skipped, the toast says the commands were skipped and where to trust them, and the log and the dry run print the exact line to add. One line covers both blocks: a repository you trust to set a worktree up is trusted to tear it down again.
 
 The hash is what stops a branch from borrowing that trust. The commands are read from whatever the main checkout holds, so without it, checking out a pull request to review it would be enough for the next worktree to run whatever that branch put in `post_create`. Change either block, on any branch, and both are skipped again until you add the new line. Formatting, comments and every other key are not part of the hash, so editing `copy` or `notify` asks for nothing. Several lines may name the same repository, which suits switching between two branches whose commands differ.
 
@@ -243,7 +262,9 @@ would run  docker compose -p {{ repo_name }}-{{ branch | sanitize }} down -v —
 press any key to close
 ```
 
-The pane is the point. Herdr captures the stdout of a plugin action into the command log and displays it nowhere, so a preview the action printed itself would be a preview nobody reads. The pane closes on the next key you press. When Herdr will not open one — another modal is already up — the action says so and falls back to printing the preview into the log, where `herdr plugin log list` finds it.
+When the repository is not trusted for the commands shown, the last line offers `t` to trust them instead, as [Setup commands and trust](#setup-commands-and-trust) describes.
+
+The pane is the point. Herdr captures the stdout of a plugin action into the command log and displays it nowhere, so a preview the action printed itself would be a preview nobody reads. The pane closes on the next key you press. When Herdr will not open one — another modal is already up — the action says so and falls back to printing the preview into the log, where `herdr plugin log list` finds it. Nobody can press a key in the log, so trust is never offered there.
 
 A line before the commands says whether they would run: the hash in force when the repository is trusted, or the reason they would be skipped and the exact line to add to `trusted-repos.txt`. `post_create` commands appear rendered and quoted exactly as they would reach the shell, which is the fastest way to see what a template resolves to. `post_remove` commands are listed as written, because the trust line approves them too and their variables are only filled in at removal. The copy, link and seed lines are the targets as they were resolved, not a promise that each one would succeed. A template that cannot be rendered is reported and exits non-zero.
 

@@ -27,6 +27,10 @@ const vars = worktreeVariables({
 
 const assignsSomething = (block) => /^\s*[a-z_]+\s*=/m.test(block);
 
+// A block that opens by naming Herdr's own config file shows Herdr settings,
+// such as a key bound to an action, which this plugin never reads.
+const isHerdrConfig = (block) => /^# ~\/\.config\/herdr\/config\.toml\b/.test(block);
+
 for (const file of DOCS) {
   test(`every config ${file} shows is one the plugin accepts`, () => {
     const blocks = tomlBlocks(file);
@@ -36,6 +40,7 @@ for (const file of DOCS) {
 
     for (const [index, [, block]] of blocks.entries()) {
       const where = `${file} toml block ${index + 1}`;
+      if (isHerdrConfig(block)) continue;
 
       // One block is the detection listing `init-config` writes above the keys,
       // which is commentary rather than configuration. It has to be all comment

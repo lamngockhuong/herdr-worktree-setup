@@ -62,16 +62,24 @@ export function printReport(results) {
 /** A toast names the branch it is about, when the run knew one. */
 const body = (line, branch) => (branch ? `${branch}: ${line}` : line);
 
+// Where a skipped block is put right: the manifest title of the dry-run action,
+// whose pane shows the commands and grants trust for them with one key.
+export const TRUST_HINT = "open Preview worktree setup to read and trust them";
+
+/** The body of a toast about a block the trust gate skipped, with the way out. */
+const untrustedBody = (line, branch) => `${body(line, branch)}; ${TRUST_HINT}`;
+
 /**
  * The toast a finished setup deserves, which is one either way. Skipped
  * commands get a title of their own: after the trust list changed format,
  * "ready" over a worktree whose setup never ran would be the only thing seen.
  */
 export function setupToast(summary, line, branch) {
-  let title = "Worktree ready";
-  if (summary.untrusted > 0) title = "Worktree ready, commands skipped";
-  if (summary.failed > 0) title = "Worktree setup incomplete";
-  return { title, body: body(line, branch) };
+  if (summary.failed > 0) return { title: "Worktree setup incomplete", body: body(line, branch) };
+  if (summary.untrusted > 0) {
+    return { title: "Worktree ready, commands skipped", body: untrustedBody(line, branch) };
+  }
+  return { title: "Worktree ready", body: body(line, branch) };
 }
 
 /**
@@ -84,7 +92,9 @@ export function setupToast(summary, line, branch) {
  */
 export function cleanupToast(summary, line, branch) {
   if (summary.failed > 0) return { title: "Worktree cleanup incomplete", body: body(line, branch) };
-  if (summary.untrusted > 0) return { title: "Worktree cleanup skipped", body: body(line, branch) };
+  if (summary.untrusted > 0) {
+    return { title: "Worktree cleanup skipped", body: untrustedBody(line, branch) };
+  }
   return null;
 }
 
