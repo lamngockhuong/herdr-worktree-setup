@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.5.0...v0.5.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* bound and escape the preview, and read the config only as a regular file ([#30](https://github.com/lamngockhuong/herdr-worktree-setup/issues/30)) ([14a3de4](https://github.com/lamngockhuong/herdr-worktree-setup/commit/14a3de400a53dc345262b5c9bce4e97edc4e5bb0))
+
 ## [0.5.0](https://github.com/lamngockhuong/herdr-worktree-setup/compare/v0.4.0...v0.5.0) (2026-11-17)
 
 
